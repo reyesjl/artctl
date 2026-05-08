@@ -139,7 +139,7 @@ function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           </button>
         </div>
       </form>
-      {!query ? <p>Enter a Met search query to begin browsing works.</p> : null}
+      {!query ? <p>Enter a search to find works.</p> : null}
       {query && status === "loading" ? <p>Loading search results…</p> : null}
       {query && status === "error" ? <p>{error}</p> : null}
       {query && status === "success" ? (
@@ -147,6 +147,16 @@ function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           {results.map((result) => (
             <li key={result.objectId} className="search-result">
               <Link to={`/works/${result.objectId}`}>{result.title}</Link>
+              {!result.isPublicDomain || !result.hasImage ? (
+                <p className="search-result-flags">
+                  {!result.isPublicDomain ? (
+                    <span className="search-result-flag">Rights Restricted</span>
+                  ) : null}
+                  {!result.hasImage ? (
+                    <span className="search-result-flag">No Image Available</span>
+                  ) : null}
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -326,7 +336,7 @@ function AppShell({ shell, apiBaseUrl, fetchImpl, themeName, onThemeChange }) {
           element={<ThemesPage themeName={themeName} onThemeChange={onThemeChange} />}
         />
       </Routes>
-      <footer className="status-line">v0.1.0 [met-only mvp]</footer>
+      <footer className="status-line">v0.1.0</footer>
     </div>
   );
 }

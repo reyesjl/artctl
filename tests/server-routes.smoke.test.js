@@ -242,10 +242,83 @@ describe("search API", () => {
           title: "Sunflowers",
           artist: "Vincent van Gogh",
           date: "1887",
-          imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DP130155.jpg"
+          imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DP130155.jpg",
+          isPublicDomain: false,
+          hasImage: true
         }
       ]
     });
     expect(requests).toHaveLength(2);
+  });
+
+  test("GET /api/search returns explicit public-domain and image-availability flags", async () => {
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.includes("/search?")) {
+          return createJsonResponse({
+            total: 2,
+            objectIDs: [436524, 486055]
+          });
+        }
+
+        if (url.endsWith("/objects/436524")) {
+          return createJsonResponse({
+            objectID: 436524,
+            title: "Sunflowers",
+            artistDisplayName: "Vincent van Gogh",
+            culture: "",
+            objectDate: "1887",
+            isPublicDomain: true,
+            primaryImage: "https://images.metmuseum.org/CRDImages/ep/original/DT1567.jpg",
+            primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg"
+          });
+        }
+
+        if (url.endsWith("/objects/486055")) {
+          return createJsonResponse({
+            objectID: 486055,
+            title: "Galisteo Creek",
+            artistDisplayName: "Susan Rothenberg",
+            culture: "",
+            objectDate: "1992",
+            isPublicDomain: false,
+            primaryImage: "",
+            primaryImageSmall: ""
+          });
+        }
+
+        throw new Error(`Unexpected Met API request: ${url}`);
+      }
+    });
+    const searchApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/search?q=van%20gogh", searchApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      query: "van gogh",
+      results: [
+        {
+          objectId: 436524,
+          title: "Sunflowers",
+          artist: "Vincent van Gogh",
+          date: "1887",
+          imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
+          isPublicDomain: true,
+          hasImage: true
+        },
+        {
+          objectId: 486055,
+          title: "Galisteo Creek",
+          artist: "Susan Rothenberg",
+          date: "1992",
+          imageUrl: "",
+          isPublicDomain: false,
+          hasImage: false
+        }
+      ]
+    });
   });
 });

@@ -118,12 +118,14 @@ a {
   padding: 12px;
 }
 
+/*
 .panel {
   border: 1px solid hsl(var(--border));
   background: hsl(var(--card));
   padding: 8px 12px;
   color: hsl(var(--card-foreground));
 }
+*/
 
 .panel h1,
 .panel p {
@@ -192,6 +194,18 @@ a {
 
 .search-result a {
   color: hsl(var(--primary));
+}
+
+.search-result-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+
+.search-result-flag {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .work-viewer {

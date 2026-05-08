@@ -26,12 +26,16 @@ function normalizeContext(object) {
 }
 
 function normalizeSearchResult(object) {
+  const imageUrl = object.primaryImageSmall || object.primaryImage || "";
+
   return {
     objectId: object.objectID,
     title: object.title,
     artist: normalizeArtist(object),
     date: normalizeDate(object),
-    imageUrl: object.primaryImageSmall || object.primaryImage || ""
+    imageUrl,
+    isPublicDomain: Boolean(object.isPublicDomain),
+    hasImage: Boolean(imageUrl)
   };
 }
 

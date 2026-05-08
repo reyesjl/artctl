@@ -213,6 +213,44 @@ test("loading a populated search URL restores the same search context", async ()
   expect(requests).toContain("/api/search?q=harvesters");
 });
 
+test("search results show inline availability markers for rights and image status", async () => {
+  const metClient = {
+    async searchCollection(query) {
+      return {
+        query,
+        results: [
+          {
+            objectId: 436524,
+            title: "Sunflowers",
+            artist: "Vincent van Gogh",
+            date: "1887",
+            imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
+            isPublicDomain: true,
+            hasImage: true
+          },
+          {
+            objectId: 486055,
+            title: "Galisteo Creek",
+            artist: "Susan Rothenberg",
+            date: "1992",
+            imageUrl: "",
+            isPublicDomain: false,
+            hasImage: false
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=van%20gogh");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("link", { name: "Sunflowers" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "Galisteo Creek" })).toBeInTheDocument();
+  expect(screen.getByText("Rights Restricted")).toBeInTheDocument();
+  expect(screen.getByText("No Image Available")).toBeInTheDocument();
+});
+
 test("search route shows an error message when Express cannot load Met results", async () => {
   const metClient = {
     async searchCollection() {
