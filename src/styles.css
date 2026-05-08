@@ -343,18 +343,23 @@ a {
   font-size: 14px;
 }
 
-.help-page {
-  max-width: 672px;
-  display: grid;
-  gap: 24px;
-  font-size: 12px;
-}
-
+.help-page,
 .help-page-header,
-.help-section,
 .help-page-examples {
   display: grid;
   gap: 8px;
+}
+
+.help-page {
+  max-width: 672px;
+  font-size: 16px;
+  gap: 0;
+}
+
+.help-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
 }
 
 .help-page-manual,
@@ -365,13 +370,14 @@ a {
   margin: 0;
 }
 
-.help-page-manual,
 .help-section-title {
   color: hsl(var(--primary));
+  font-weight: 700;
 }
 
 .help-page-manual {
-  font-size: 16px;
+  color: hsl(var(--primary));
+  font-size: 20px;
   font-weight: 700;
 }
 
@@ -501,4 +507,5 @@ a {
     border-top: 0;
     border-left: 1px solid hsl(var(--border));
   }
+
 }

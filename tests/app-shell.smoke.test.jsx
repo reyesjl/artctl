@@ -82,7 +82,7 @@ beforeEach(() => {
 test("homepage loads the persistent app shell from the Express backend", async () => {
   render(<App fetchImpl={fetchImpl} />);
 
-  expect(await screen.findByText("ARTCTL")).toBeInTheDocument();
+  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(screen.queryByText("[ARTCTL]")).not.toBeInTheDocument();
   expect(screen.queryByText("Met collection terminal viewer")).not.toBeInTheDocument();
   expect(document.documentElement.dataset.theme).toBe("dark-green");
@@ -103,7 +103,7 @@ test.each([
 
   render(<App fetchImpl={fetchImpl} />);
 
-  expect(await screen.findByText("ARTCTL")).toBeInTheDocument();
+  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
@@ -420,27 +420,35 @@ test("work viewer shows a not found message when Express cannot load the object"
   expect(screen.queryByRole("img")).not.toBeInTheDocument();
 });
 
-test("help route presents ARTCTL as a Cortex-style man page", async () => {
+test("help route presents the current ARTCTL product copy", async () => {
   window.history.pushState({}, "", "/help");
 
   render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
-  expect(screen.getByText("ARTCTL(1)")).toBeInTheDocument();
-  expect(screen.getByText("Terminal Art Browser — User Manual")).toBeInTheDocument();
-  expect(screen.getByText("── NAME ──")).toBeInTheDocument();
-  expect(screen.getByText(/artctl — a terminal-style browser for the metropolitan museum of art collection/i)).toBeInTheDocument();
-  expect(screen.getByText("── SYNOPSIS ──")).toBeInTheDocument();
-  expect(screen.getByText(/browse gallery \| search collection \| inspect work/i)).toBeInTheDocument();
-  expect(screen.getByText("── EXAMPLES ──")).toBeInTheDocument();
-  expect(screen.getByText(/open \/$/i)).toBeInTheDocument();
-  expect(screen.getByText(/open \/search\?q=sunflowers/i)).toBeInTheDocument();
-  expect(screen.getByText("── GALLERY ──")).toBeInTheDocument();
-  expect(screen.getByText(/shows highlighted public-domain works/i)).toBeInTheDocument();
-  expect(screen.getByText("── WORK VIEWER ──")).toBeInTheDocument();
-  expect(screen.getByText(/viewer shows the preferred met image/i)).toBeInTheDocument();
-  expect(screen.getByText("── THEMES ──")).toBeInTheDocument();
-  expect(screen.getByText(/switch between built-in color themes/i)).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL", { selector: ".help-page-manual" })).toBeInTheDocument();
+  expect(screen.getByText("Public-domain artwork explorer")).toBeInTheDocument();
+  expect(screen.getByText("── Gallery ──")).toBeInTheDocument();
+  expect(
+    screen.getByText(/browse highlighted public-domain artworks in a quiet, minimal interface/i)
+  ).toBeInTheDocument();
+  expect(screen.getByText(/sunflowers · armor · monet · ukiyo-e · cats/i)).toBeInTheDocument();
+  expect(screen.getByText("── Search ──")).toBeInTheDocument();
+  expect(
+    screen.getByText(/search across artists, titles, cultures, materials, periods/i)
+  ).toBeInTheDocument();
+  expect(screen.getByText("── Help ──")).toBeInTheDocument();
+  expect(
+    screen.getByText(/artctl is designed as a lightweight artwork browser inspired by terminal systems/i)
+  ).toBeInTheDocument();
+  expect(screen.getByText("── Themes ──")).toBeInTheDocument();
+  expect(
+    screen.getByText(/your selected theme persists across gallery, search, help, and artwork views/i)
+  ).toBeInTheDocument();
+  expect(screen.getByText("── Collection Source ──")).toBeInTheDocument();
+  expect(
+    screen.getByText(/the current collection source is the metropolitan museum open access api/i)
+  ).toBeInTheDocument();
 });
 
 test("themes route matches the Cortex-style theme picker structure and active state", async () => {

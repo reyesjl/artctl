@@ -13,73 +13,66 @@ export function HelpPage() {
       <article className="help-page">
         <h1 className="sr-only">Help</h1>
         <div className="help-page-header">
-          <p className="help-page-manual">ARTCTL(1)</p>
-          <p className="help-page-subtitle">Terminal Art Browser — User Manual</p>
+          <p className="help-page-manual">ARTCTL</p>
+          <p className="help-page-subtitle">Public-domain artwork explorer</p>
         </div>
 
-        <HelpSection title="NAME">
+        <HelpSection title="Gallery">
           <p className="help-page-copy">
-            ARTCTL — a terminal-style browser for the Metropolitan Museum of Art collection.
-            Browse highlights, search the collection, inspect work detail, and switch visual themes.
+            Browse highlighted public-domain artworks in a quiet, minimal interface designed for
+            visual exploration.
+          </p>
+          <p className="help-page-copy">
+            The gallery surfaces only works with available imagery and adapts subtly to the
+            currently selected theme.
+          </p>
+          <p className="help-page-copy">Suggested searches:</p>
+          <p className="help-page-copy">sunflowers · armor · monet · ukiyo-e · cats</p>
+        </HelpSection>
+
+        <HelpSection title="Search">
+          <p className="help-page-copy">
+            Search across artists, titles, cultures, materials, periods, and collection metadata.
+          </p>
+          <p className="help-page-copy">
+            Search state is preserved in the URL so collections and discoveries can be revisited or
+            shared directly.
           </p>
         </HelpSection>
 
-        <HelpSection title="SYNOPSIS">
-          <div className="help-page-example">
-            <span className="help-page-prompt">&gt; </span>
-            browse gallery | search collection | inspect work
-          </div>
+        <HelpSection title="Help">
           <p className="help-page-copy">
-            Routes stay lightweight and use the Met-backed Express surface for collection data.
+            ARTCTL is designed as a lightweight artwork browser inspired by terminal systems,
+            archival interfaces, and modern museum software.
+          </p>
+          <p className="help-page-copy">
+            The interface emphasizes focus, fast navigation, and high-resolution public-domain
+            imagery.
           </p>
         </HelpSection>
 
-        <HelpSection title="EXAMPLES">
-          <div className="help-page-examples">
-            <div className="help-page-example">
-              <span className="help-page-prompt">&gt; </span>
-              open /
-            </div>
-            <div className="help-page-example">
-              <span className="help-page-prompt">&gt; </span>
-              open /search?q=sunflowers
-            </div>
-            <div className="help-page-example">
-              <span className="help-page-prompt">&gt; </span>
-              open /works/436121
-            </div>
-            <div className="help-page-example">
-              <span className="help-page-prompt">&gt; </span>
-              open /themes
-            </div>
-          </div>
-        </HelpSection>
-
-        <HelpSection title="GALLERY">
+        <HelpSection title="Themes">
           <p className="help-page-copy">
-            Shows highlighted public-domain works in a deterministic order. Hover a card to pick
-            up the current theme accent, then open a work for closer inspection.
+            Switch between built-in visual themes inspired by terminal systems, archival software,
+            and modern display environments.
+          </p>
+          <p className="help-page-copy">
+            Your selected theme persists across gallery, search, help, and artwork views.
           </p>
         </HelpSection>
 
-        <HelpSection title="SEARCH">
+        <HelpSection title="Collection Source">
           <p className="help-page-copy">
-            Search submits your query through the Express backend and restores the current query
-            from the URL so the same result set can be revisited directly.
+            ARTCTL is an independent project and is not affiliated with or endorsed by the
+            Metropolitan Museum of Art.
           </p>
-        </HelpSection>
-
-        <HelpSection title="WORK VIEWER">
           <p className="help-page-copy">
-            Viewer shows the preferred Met image when available, then falls back to metadata
-            context, date, and the original Met object link.
+            The current collection source is the Metropolitan Museum Open Access API, selected for
+            its large catalog of public-domain artworks and high-resolution imagery.
           </p>
-        </HelpSection>
-
-        <HelpSection title="THEMES">
           <p className="help-page-copy">
-            Switch between built-in color themes. The current theme is stored in browser
-            localStorage and is applied across gallery, search, help, and viewer routes.
+            Only works marked as public domain and containing available imagery are displayed within
+            ARTCTL.
           </p>
         </HelpSection>
       </article>
