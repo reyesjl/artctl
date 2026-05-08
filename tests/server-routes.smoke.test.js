@@ -22,22 +22,40 @@ async function makeRequest(url, targetApp = app) {
   return response;
 }
 
-function createJsonResponse(payload) {
+function createHeaders(contentType, setCookies = []) {
+  return {
+    get(name) {
+      if (name.toLowerCase() === "content-type") {
+        return contentType;
+      }
+
+      return null;
+    },
+    getSetCookie() {
+      return setCookies;
+    }
+  };
+}
+
+function createJsonResponse(payload, { setCookies = [] } = {}) {
   return {
     ok: true,
     status: 200,
-    headers: new Headers({ "content-type": "application/json" }),
+    headers: createHeaders("application/json", setCookies),
     async json() {
       return payload;
     }
   };
 }
 
-function createTextResponse(body, { status = 200, contentType = "text/plain" } = {}) {
+function createTextResponse(
+  body,
+  { status = 200, contentType = "text/plain", setCookies = [] } = {}
+) {
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers: new Headers({ "content-type": contentType }),
+    headers: createHeaders(contentType, setCookies),
     async text() {
       return body;
     },
@@ -169,6 +187,61 @@ describe("work detail API", () => {
       imageUrl: "",
       metUrl: "https://www.metmuseum.org/art/collection/search/486055"
     });
+  });
+
+  test("GET /api/works/:objectId retries once after an upstream cookie challenge", async () => {
+    const challengeCookies = [
+      "visid_incap_1662004=test-visitor; Path=/; Domain=.metmuseum.org",
+      "incap_ses_1813_1662004=test-session; Path=/; Domain=.metmuseum.org"
+    ];
+    const requests = [];
+    const metClient = createMetApiClient({
+      async fetchImpl(resource, init = {}) {
+        const url = String(resource);
+        requests.push({ url, cookie: init.headers?.cookie ?? "" });
+
+        if (url.endsWith("/objects/436121") && requests.length === 1) {
+          return createTextResponse("<html>blocked</html>", {
+            status: 403,
+            contentType: "text/html",
+            setCookies: challengeCookies
+          });
+        }
+
+        if (url.endsWith("/objects/436121")) {
+          return createJsonResponse({
+            objectID: 436121,
+            title: "The Great Wave off Kanagawa",
+            artistDisplayName: "",
+            culture: "Japanese",
+            objectDate: "ca. 1830-32",
+            objectName: "Print",
+            medium: "Polychrome woodblock print; ink and color on paper",
+            primaryImage: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+            primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg",
+            objectURL: "https://www.metmuseum.org/art/collection/search/45434"
+          });
+        }
+
+        throw new Error(`Unexpected Met API request: ${url}`);
+      }
+    });
+    const detailApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/works/436121", detailApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData()).objectId).toBe(436121);
+    expect(requests).toEqual([
+      {
+        url: "https://collectionapi.metmuseum.org/public/collection/v1/objects/436121",
+        cookie: ""
+      },
+      {
+        url: "https://collectionapi.metmuseum.org/public/collection/v1/objects/436121",
+        cookie: "visid_incap_1662004=test-visitor; incap_ses_1813_1662004=test-session"
+      }
+    ]);
   });
 });
 
@@ -320,5 +393,205 @@ describe("search API", () => {
         }
       ]
     });
+  });
+});
+
+describe("gallery API", () => {
+  test("GET /api/gallery uses highlight search to build a deterministic gallery batch", async () => {
+    const requests = [];
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+        requests.push(url);
+
+        if (url.includes("/search?")) {
+          return createJsonResponse({
+            total: 4,
+            objectIDs: [500, 475, 498, 490]
+          });
+        }
+
+        const objectId = Number(url.split("/").at(-1));
+
+        return createJsonResponse({
+          objectID: objectId,
+          title: `Work ${objectId}`,
+          artistDisplayName: `Artist ${objectId}`,
+          culture: "",
+          isHighlight: true,
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+        });
+      }
+    });
+    const galleryApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+    const searchRequest = new URL(requests[0]);
+
+    expect(response.statusCode).toBe(200);
+    expect(searchRequest.pathname).toBe("/public/collection/v1/search");
+    expect(searchRequest.searchParams.get("isHighlight")).toBe("true");
+    expect(searchRequest.searchParams.get("hasImages")).toBe("true");
+    expect(searchRequest.searchParams.get("q")).toBe("*");
+    expect(JSON.parse(response._getData()).results).toHaveLength(4);
+    expect(JSON.parse(response._getData()).results[0]).toEqual({
+      objectId: 475,
+      title: "Work 475",
+      artist: "Artist 475",
+      imageUrl: "https://images.metmuseum.org/CRDImages/test/web-large/475.jpg"
+    });
+    expect(JSON.parse(response._getData()).results.at(-1).objectId).toBe(500);
+  });
+
+  test("GET /api/gallery skips individual object fetch failures while building the first batch", async () => {
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.includes("/search?")) {
+          return createJsonResponse({
+            total: 26,
+            objectIDs: Array.from({ length: 26 }, (_, index) => 500 - index)
+          });
+        }
+
+        const objectId = Number(url.split("/").at(-1));
+
+        if (objectId === 490) {
+          throw new Error("socket hang up");
+        }
+
+        return createJsonResponse({
+          objectID: objectId,
+          title: `Work ${objectId}`,
+          artistDisplayName: `Artist ${objectId}`,
+          culture: "",
+          isHighlight: true,
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+        });
+      }
+    });
+    const galleryApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+    const results = JSON.parse(response._getData()).results;
+
+    expect(response.statusCode).toBe(200);
+    expect(results).toHaveLength(24);
+    expect(results.some((work) => work.objectId === 490)).toBe(false);
+    expect(results.at(-1).objectId).toBe(499);
+  });
+
+  test("GET /api/gallery reuses challenge cookies across the upstream fanout", async () => {
+    const challengeCookies = [
+      "visid_incap_1662004=test-visitor; Path=/; Domain=.metmuseum.org",
+      "incap_ses_1813_1662004=test-session; Path=/; Domain=.metmuseum.org"
+    ];
+    const requests = [];
+    const metClient = createMetApiClient({
+      async fetchImpl(resource, init = {}) {
+        const url = String(resource);
+        requests.push({ url, cookie: init.headers?.cookie ?? "" });
+
+        if (url.includes("/search?") && requests.length === 1) {
+          return createTextResponse("<html>blocked</html>", {
+            status: 403,
+            contentType: "text/html",
+            setCookies: challengeCookies
+          });
+        }
+
+        if (url.includes("/search?")) {
+          return createJsonResponse({
+            total: 24,
+            objectIDs: Array.from({ length: 24 }, (_, index) => index + 1)
+          });
+        }
+
+        const objectId = Number(url.split("/").at(-1));
+
+        return createJsonResponse({
+          objectID: objectId,
+          title: `Work ${objectId}`,
+          artistDisplayName: `Artist ${objectId}`,
+          culture: "",
+          isHighlight: true,
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+        });
+      }
+    });
+    const galleryApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+    const objectRequestCookies = requests
+      .filter(({ url }) => /\/objects\/\d+$/.test(url))
+      .map(({ cookie }) => cookie);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData()).results).toHaveLength(24);
+    expect(requests.slice(0, 2)).toEqual([
+      {
+        url: "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&isHighlight=true&q=*",
+        cookie: ""
+      },
+      {
+        url: "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&isHighlight=true&q=*",
+        cookie: "visid_incap_1662004=test-visitor; incap_ses_1813_1662004=test-session"
+      }
+    ]);
+    expect(objectRequestCookies.every(Boolean)).toBe(true);
+  });
+
+  test("GET /api/gallery serves the last cached gallery page when a later upstream request times out", async () => {
+    const stableGalleryIds = [475, 490, 498];
+    let galleryFetches = 0;
+    const metClient = createMetApiClient({
+      cacheTtlMs: 0,
+      requestTimeoutMs: 5,
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.includes("/search?")) {
+          galleryFetches += 1;
+
+          if (galleryFetches === 1) {
+            return createJsonResponse({
+              total: stableGalleryIds.length,
+              objectIDs: stableGalleryIds
+            });
+          }
+
+          return new Promise(() => {});
+        }
+
+        const objectId = Number(url.split("/").at(-1));
+
+        return createJsonResponse({
+          objectID: objectId,
+          title: `Work ${objectId}`,
+          artistDisplayName: `Artist ${objectId}`,
+          culture: "",
+          isHighlight: true,
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+        });
+      }
+    });
+    const galleryApp = createArtctlApp({ metClient });
+
+    const firstResponse = await makeRequest("/api/gallery", galleryApp);
+    const secondResponse = await makeRequest("/api/gallery", galleryApp);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(JSON.parse(secondResponse._getData())).toEqual(JSON.parse(firstResponse._getData()));
+    expect(galleryFetches).toBe(3);
   });
 });

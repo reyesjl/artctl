@@ -25,13 +25,81 @@ function RouteFrame({ eyebrow, title, description, children }) {
   );
 }
 
-function HomePage() {
+function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
+  const [results, setResults] = useState([]);
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadGallery() {
+      setStatus("loading");
+      setError("");
+
+      try {
+        const response = await fetchImpl(`${apiBaseUrl}/api/gallery`);
+        const data = await response.json();
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          setResults([]);
+          setError(data.error || "Unable to load gallery.");
+          setStatus("error");
+          return;
+        }
+
+        setResults(data.results ?? []);
+        setStatus("success");
+      } catch (error) {
+        if (!cancelled) {
+          setResults([]);
+          setError(error instanceof Error ? error.message : "Unable to load gallery.");
+          setStatus("error");
+        }
+      }
+    }
+
+    loadGallery();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, fetchImpl]);
+
   return (
     <RouteFrame
       eyebrow="[gallery]"
       title="Gallery"
-      description="The Met highlighted works will land here in deterministic batches."
-    />
+      description="Showing The Met's highlighted works in deterministic order."
+    >
+      {status === "loading" ? <p>Loading gallery…</p> : null}
+      {status === "error" ? <p>{error}</p> : null}
+      {status === "success" ? (
+        <ul className="gallery-grid">
+          {results.map((work) => (
+            <li key={work.objectId} className="gallery-card">
+              <Link to={`/works/${work.objectId}`}>
+                <figure className="gallery-card-media">
+                  {work.imageUrl ? (
+                    <img className="gallery-card-image" src={work.imageUrl} alt={work.title} />
+                  ) : (
+                    <div className="gallery-card-image gallery-card-image-placeholder" />
+                  )}
+                </figure>
+                <div className="gallery-card-copy">
+                  <strong className="gallery-card-title">{work.title}</strong>
+                  <p className="gallery-card-meta">{work.artist}</p>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </RouteFrame>
   );
 }
 
@@ -244,60 +312,128 @@ function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   );
 }
 
+function HelpSection({ title, children }) {
+  return (
+    <section className="help-section">
+      <p className="help-section-title">── {title} ──</p>
+      {children}
+    </section>
+  );
+}
+
 function HelpPage() {
   return (
-    <RouteFrame
-      eyebrow="[help]"
-      title="Help"
-      description="Usage guidance, provenance, and analysis mode notes will live here."
-    >
-      <div className="manual-section">
-        <h2>How to use ARTCTL</h2>
-        <p>
-          Browse the gallery, run a search, and open a work to move through the
-          current ARTCTL browsing flow.
-        </p>
-      </div>
-      <div className="manual-section">
-        <h2>Provenance</h2>
-        <p>
-          Works come from The Metropolitan Museum of Art and are presented through
-          ARTCTL&apos;s Express-backed application surface.
-        </p>
-      </div>
-      <div className="manual-section">
-        <h2>Analysis views</h2>
-        <p>
-          Edges, Detail, and Composition are browser-side analysis modes that
-          replace the main work image when active.
-        </p>
-      </div>
-    </RouteFrame>
+    <main className="app-main">
+      <article className="help-page">
+        <h1 className="sr-only">Help</h1>
+        <div className="help-page-header">
+          <p className="help-page-manual">ARTCTL(1)</p>
+          <p className="help-page-subtitle">Terminal Art Browser — User Manual</p>
+        </div>
+
+        <HelpSection title="NAME">
+          <p className="help-page-copy">
+            ARTCTL — a terminal-style browser for the Metropolitan Museum of Art collection.
+            Browse highlights, search the collection, inspect work detail, and switch visual themes.
+          </p>
+        </HelpSection>
+
+        <HelpSection title="SYNOPSIS">
+          <div className="help-page-example">
+            <span className="help-page-prompt">&gt; </span>
+            browse gallery | search collection | inspect work
+          </div>
+          <p className="help-page-copy">Routes stay lightweight and use the Met-backed Express surface for collection data.</p>
+        </HelpSection>
+
+        <HelpSection title="EXAMPLES">
+          <div className="help-page-examples">
+            <div className="help-page-example">
+              <span className="help-page-prompt">&gt; </span>
+              open /
+            </div>
+            <div className="help-page-example">
+              <span className="help-page-prompt">&gt; </span>
+              open /search?q=sunflowers
+            </div>
+            <div className="help-page-example">
+              <span className="help-page-prompt">&gt; </span>
+              open /works/436121
+            </div>
+            <div className="help-page-example">
+              <span className="help-page-prompt">&gt; </span>
+              open /themes
+            </div>
+          </div>
+        </HelpSection>
+
+        <HelpSection title="GALLERY">
+          <p className="help-page-copy">
+            Shows highlighted public-domain works in a deterministic order. Hover a card to pick up the current theme accent, then open a work for closer inspection.
+          </p>
+        </HelpSection>
+
+        <HelpSection title="SEARCH">
+          <p className="help-page-copy">
+            Search submits your query through the Express backend and restores the current query from the URL so the same result set can be revisited directly.
+          </p>
+        </HelpSection>
+
+        <HelpSection title="WORK VIEWER">
+          <p className="help-page-copy">
+            Viewer shows the preferred Met image when available, then falls back to metadata context, date, and the original Met object link.
+          </p>
+        </HelpSection>
+
+        <HelpSection title="THEMES">
+          <p className="help-page-copy">
+            Switch between built-in color themes. The current theme is stored in browser localStorage and is applied across gallery, search, help, and viewer routes.
+          </p>
+        </HelpSection>
+      </article>
+    </main>
   );
 }
 
 function ThemesPage({ themeName, onThemeChange }) {
   return (
-    <RouteFrame
-      eyebrow="[themes]"
-      title="Themes"
-      description="Built-in terminal-adjacent themes will be previewed and selected here."
-    >
-      <div className="theme-grid">
-        {THEMES.map((theme) => (
-          <button
-            key={theme.id}
-            type="button"
-            aria-label={theme.label}
-            className={theme.id === themeName ? "theme-option active" : "theme-option"}
-            onClick={() => onThemeChange(theme.id)}
-          >
-            <span className="theme-option-name">{theme.label}</span>
-            <span className="theme-option-preview">{theme.preview.bg}</span>
-          </button>
-        ))}
-      </div>
-    </RouteFrame>
+    <main className="app-main">
+      <section className="theme-page">
+        <h1 className="sr-only">Themes</h1>
+        <p className="theme-page-title">── theme ──</p>
+        <p className="theme-page-description">Choose a color theme. Your selection is saved locally.</p>
+        <div className="theme-grid">
+          {THEMES.map((theme) => {
+            const isActive = theme.id === themeName;
+
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                aria-label={theme.label}
+                aria-pressed={isActive}
+                className={isActive ? "theme-option active" : "theme-option"}
+                onClick={() => onThemeChange(theme.id)}
+              >
+                <span className="theme-option-swatches" aria-hidden="true">
+                  <span
+                    className="theme-option-swatch"
+                    style={{ background: theme.preview.bg }}
+                  />
+                  <span
+                    className="theme-option-swatch"
+                    style={{ background: theme.preview.primary }}
+                  />
+                </span>
+                <span className="theme-option-name">{theme.label}</span>
+                {isActive ? <span className="theme-option-check">✓</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        <p className="theme-page-footnote">theme is stored in browser localStorage</p>
+      </section>
+    </main>
   );
 }
 
@@ -321,7 +457,10 @@ function AppShell({ shell, apiBaseUrl, fetchImpl, themeName, onThemeChange }) {
         </nav>
       </header>
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route
+          path="/"
+          element={<HomePage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+        />
         <Route
           path="/search"
           element={<SearchPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}

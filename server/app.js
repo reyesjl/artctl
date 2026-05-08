@@ -50,6 +50,17 @@ export function createArtctlApp({
     }
   });
 
+  app.get("/api/gallery", async (_request, response) => {
+    try {
+      const galleryPage = await metClient.getGalleryPage();
+      response.json(galleryPage);
+    } catch (error) {
+      response.status(502).json({
+        error: "The Met gallery is temporarily unavailable. Please try again."
+      });
+    }
+  });
+
   app.get("/api/works/:objectId", async (request, response) => {
     const objectId = Number.parseInt(request.params.objectId, 10);
 

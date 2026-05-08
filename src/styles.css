@@ -107,15 +107,27 @@ a {
 }
 
 .nav-link.active {
-  color: hsl(var(--foreground));
-  background: hsl(var(--secondary));
-  border-color: hsl(var(--border));
+  color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.1);
+  border-color: transparent;
 }
 
 .app-main {
   width: min(100%, var(--content-width));
   margin: 0 auto;
   padding: 12px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /*
@@ -144,8 +156,64 @@ a {
 }
 
 .search-form,
-.search-results {
+.search-results,
+.gallery-grid {
   margin-top: 16px;
+}
+
+.gallery-grid {
+  display: grid;
+  gap: 16px;
+  padding: 0;
+  list-style: none;
+}
+
+.gallery-card {
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  transition: border-color 120ms ease;
+}
+
+.gallery-card:hover,
+.gallery-card:focus-within {
+  border-color: hsl(var(--primary));
+}
+
+.gallery-card a {
+  display: block;
+  height: 100%;
+}
+
+.gallery-card-media {
+  margin: 0;
+  background: hsl(var(--secondary));
+}
+
+.gallery-card-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+}
+
+.gallery-card-image-placeholder {
+  background: hsl(var(--muted));
+}
+
+.gallery-card-copy {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.gallery-card-title {
+  color: hsl(var(--foreground));
+}
+
+.gallery-card-meta {
+  margin: 0;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
 }
 
 .search-label {
@@ -275,34 +343,130 @@ a {
   font-size: 14px;
 }
 
+.help-page {
+  max-width: 672px;
+  display: grid;
+  gap: 24px;
+  font-size: 12px;
+}
+
+.help-page-header,
+.help-section,
+.help-page-examples {
+  display: grid;
+  gap: 8px;
+}
+
+.help-page-manual,
+.help-page-subtitle,
+.help-section-title,
+.help-page-copy,
+.help-page-example {
+  margin: 0;
+}
+
+.help-page-manual,
+.help-section-title {
+  color: hsl(var(--primary));
+}
+
+.help-page-manual {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.help-page-subtitle,
+.help-page-copy,
+.help-page-prompt {
+  color: hsl(var(--muted-foreground));
+}
+
+.help-page-example {
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+}
+
 .theme-grid {
   display: grid;
-  gap: 12px;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.theme-page {
+  max-width: 640px;
+  font-size: 12px;
+}
+
+.theme-page-title,
+.theme-page-description,
+.theme-page-footnote {
+  margin: 0;
+}
+
+.theme-page-title {
+  color: hsl(var(--primary));
+}
+
+.theme-page-description {
   margin-top: 16px;
+  color: hsl(var(--muted-foreground));
+  line-height: 1.5;
+}
+
+.theme-page-footnote {
+  margin-top: 16px;
+  color: hsl(var(--muted-foreground));
+  opacity: 0.5;
+  font-size: 10px;
 }
 
 .theme-option {
-  display: grid;
-  gap: 4px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
-  padding: 12px;
+  padding: 10px 12px;
   border: 1px solid hsl(var(--border));
-  background: hsl(var(--secondary));
+  background: hsl(var(--card));
   color: hsl(var(--foreground));
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.theme-option:hover {
+  background: hsl(var(--secondary));
 }
 
 .theme-option.active {
   border-color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+}
+
+.theme-option-swatches {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.theme-option-swatch {
+  width: 16px;
+  height: 16px;
+  border: 1px solid hsl(var(--border) / 0.5);
+  border-radius: 2px;
 }
 
 .theme-option-name {
-  font-size: 14px;
+  flex: 1;
+  font-size: 12px;
 }
 
-.theme-option-preview {
-  color: hsl(var(--muted-foreground));
+.theme-option-check {
   font-size: 12px;
 }
 
@@ -315,6 +479,14 @@ a {
 @media (min-width: 640px) {
   .app-main {
     padding: 16px;
+  }
+
+  .gallery-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .theme-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .work-viewer {

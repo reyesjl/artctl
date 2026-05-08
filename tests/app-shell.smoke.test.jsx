@@ -6,6 +6,10 @@ import { App } from "../src/App.jsx";
 import { createArtctlApp } from "../server/app.js";
 
 const defaultMetClient = {
+  async getGalleryPage() {
+    return { results: [] };
+  },
+
   async searchCollection(query) {
     return { query, results: [] };
   },
@@ -119,6 +123,58 @@ test("current route marks only the active nav link", async () => {
   expect(galleryLink).not.toHaveClass("active");
 });
 
+test("homepage renders highlighted Met works from Express as gallery links", async () => {
+  const requests = [];
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          },
+          {
+            objectId: 436524,
+            title: "Sunflowers",
+            artist: "Vincent van Gogh",
+            imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg"
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  expect(await screen.findByText(/The Met's highlighted works/i)).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: /The Great Wave off Kanagawa/i })).toHaveAttribute(
+    "href",
+    "/works/436121"
+  );
+  expect(screen.getByRole("link", { name: /Sunflowers/i })).toHaveAttribute(
+    "href",
+    "/works/436524"
+  );
+  expect(requests).toContain("/api/gallery");
+});
+
+test("homepage shows a friendly message when Express cannot load the Met gallery", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      throw new Error("Met API returned a non-JSON gallery response.");
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(
+    await screen.findByText("The Met gallery is temporarily unavailable. Please try again.")
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Sunflowers/i })).not.toBeInTheDocument();
+});
+
 test("search route shows an empty state before any query is submitted", async () => {
   const requests = [];
   window.history.pushState({}, "", "/search");
@@ -126,9 +182,7 @@ test("search route shows an empty state before any query is submitted", async ()
   render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
 
   expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
-  expect(
-    screen.getByText("Enter a Met search query to begin browsing works.")
-  ).toBeInTheDocument();
+  expect(screen.getByText("Enter a search to find works.")).toBeInTheDocument();
   expect(requests).toEqual(["/api/app-shell"]);
 });
 
@@ -177,9 +231,7 @@ test("submitting a whitespace-only query keeps the search route in its empty sta
   });
   fireEvent.click(screen.getByRole("button", { name: "[search]" }));
 
-  expect(
-    screen.getByText("Enter a Met search query to begin browsing works.")
-  ).toBeInTheDocument();
+  expect(screen.getByText("Enter a search to find works.")).toBeInTheDocument();
   expect(window.location.search).toBe("");
   expect(requests).toEqual(["/api/app-shell"]);
 });
@@ -368,26 +420,38 @@ test("work viewer shows a not found message when Express cannot load the object"
   expect(screen.queryByRole("img")).not.toBeInTheDocument();
 });
 
-test("help route explains usage, provenance, and the analysis views", async () => {
+test("help route presents ARTCTL as a Cortex-style man page", async () => {
   window.history.pushState({}, "", "/help");
 
   render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
-  expect(screen.getByText("How to use ARTCTL")).toBeInTheDocument();
-  expect(screen.getByText(/browse the gallery, run a search, and open a work/i)).toBeInTheDocument();
-  expect(screen.getByText("Provenance")).toBeInTheDocument();
-  expect(screen.getByText(/works come from the metropolitan museum of art/i)).toBeInTheDocument();
-  expect(screen.getByText("Analysis views")).toBeInTheDocument();
-  expect(screen.getByText(/edges, detail, and composition/i)).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL(1)")).toBeInTheDocument();
+  expect(screen.getByText("Terminal Art Browser — User Manual")).toBeInTheDocument();
+  expect(screen.getByText("── NAME ──")).toBeInTheDocument();
+  expect(screen.getByText(/artctl — a terminal-style browser for the metropolitan museum of art collection/i)).toBeInTheDocument();
+  expect(screen.getByText("── SYNOPSIS ──")).toBeInTheDocument();
+  expect(screen.getByText(/browse gallery \| search collection \| inspect work/i)).toBeInTheDocument();
+  expect(screen.getByText("── EXAMPLES ──")).toBeInTheDocument();
+  expect(screen.getByText(/open \/$/i)).toBeInTheDocument();
+  expect(screen.getByText(/open \/search\?q=sunflowers/i)).toBeInTheDocument();
+  expect(screen.getByText("── GALLERY ──")).toBeInTheDocument();
+  expect(screen.getByText(/shows highlighted public-domain works/i)).toBeInTheDocument();
+  expect(screen.getByText("── WORK VIEWER ──")).toBeInTheDocument();
+  expect(screen.getByText(/viewer shows the preferred met image/i)).toBeInTheDocument();
+  expect(screen.getByText("── THEMES ──")).toBeInTheDocument();
+  expect(screen.getByText(/switch between built-in color themes/i)).toBeInTheDocument();
 });
 
-test("themes route previews the built-in themes and lets the user activate one", async () => {
+test("themes route matches the Cortex-style theme picker structure and active state", async () => {
   window.history.pushState({}, "", "/themes");
 
   render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByRole("heading", { name: "Themes" })).toBeInTheDocument();
+  expect(screen.getByText("── theme ──")).toBeInTheDocument();
+  expect(screen.getByText("Choose a color theme. Your selection is saved locally.")).toBeInTheDocument();
+  expect(screen.getByText("theme is stored in browser localStorage")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Dark Green" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Light" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Dark Blue" })).toBeInTheDocument();
@@ -401,10 +465,14 @@ test("themes route previews the built-in themes and lets the user activate one",
   expect(screen.getByRole("button", { name: "CRT Amber" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Solarized" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Sepia" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Green" })).toHaveTextContent("✓");
+  expect(screen.getAllByText("✓")).toHaveLength(1);
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 
   expect(document.documentElement.dataset.theme).toBe("solarized");
+  expect(screen.getByRole("button", { name: "Solarized" })).toHaveTextContent("✓");
+  expect(screen.getAllByText("✓")).toHaveLength(1);
 });
 
 test("activating a Cortex theme applies the original Cortex token values", async () => {
