@@ -40,8 +40,45 @@ export function createArtctlApp({
       return;
     }
 
-    const results = await metClient.searchCollection(query);
-    response.json(results);
+    try {
+      const results = await metClient.searchCollection(query);
+      response.json(results);
+    } catch (error) {
+      response.status(502).json({
+        error: error.message
+      });
+    }
+  });
+
+  app.get("/api/works/:objectId", async (request, response) => {
+    const objectId = Number.parseInt(request.params.objectId, 10);
+
+    if (Number.isNaN(objectId)) {
+      response.status(400).json({
+        error: "Object ID must be a number."
+      });
+      return;
+    }
+
+    let work;
+
+    try {
+      work = await metClient.getWork(objectId);
+    } catch (error) {
+      response.status(502).json({
+        error: error.message
+      });
+      return;
+    }
+
+    if (!work) {
+      response.status(404).json({
+        error: "Work not found."
+      });
+      return;
+    }
+
+    response.json(work);
   });
 
   if (staticDir) {

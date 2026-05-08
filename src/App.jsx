@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   BrowserRouter,
   Link,
@@ -36,15 +36,19 @@ function HomePage() {
 }
 
 function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
-  const [searchParams] = useSearchParams();
-  const [, setSearchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q")?.trim() ?? "";
   const [draftQuery, setDraftQuery] = useState(query);
+  const previousQueryRef = useRef(query);
   const [results, setResults] = useState([]);
+  const [error, setError] = useState("");
   const [status, setStatus] = useState("idle");
 
   useEffect(() => {
-    setDraftQuery(query);
+    if (previousQueryRef.current !== query) {
+      previousQueryRef.current = query;
+      setDraftQuery(query);
+    }
   }, [query]);
 
   useEffect(() => {
@@ -52,20 +56,39 @@ function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
     async function loadResults() {
       setStatus("loading");
+      setError("");
 
-      const response = await fetchImpl(
-        `${apiBaseUrl}/api/search?q=${encodeURIComponent(query)}`
-      );
-      const data = await response.json();
+      try {
+        const response = await fetchImpl(
+          `${apiBaseUrl}/api/search?q=${encodeURIComponent(query)}`
+        );
+        const data = await response.json();
 
-      if (!cancelled) {
-        setResults(data.results);
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          setResults([]);
+          setError(data.error || "Unable to load search results.");
+          setStatus("error");
+          return;
+        }
+
+        setResults(data.results ?? []);
         setStatus("success");
+      } catch (error) {
+        if (!cancelled) {
+          setResults([]);
+          setError(error instanceof Error ? error.message : "Unable to load search results.");
+          setStatus("error");
+        }
       }
     }
 
     if (!query) {
       setResults([]);
+      setError("");
       setStatus("idle");
       return () => {
         cancelled = true;
@@ -118,6 +141,7 @@ function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       </form>
       {!query ? <p>Enter a Met search query to begin browsing works.</p> : null}
       {query && status === "loading" ? <p>Loading search results…</p> : null}
+      {query && status === "error" ? <p>{error}</p> : null}
       {query && status === "success" ? (
         <ul className="search-results">
           {results.map((result) => (
@@ -131,15 +155,82 @@ function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   );
 }
 
-function WorkPage() {
+function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const { objectId } = useParams();
+  const [work, setWork] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadWork() {
+      const response = await fetchImpl(`${apiBaseUrl}/api/works/${objectId}`);
+      const data = await response.json();
+
+      if (!cancelled) {
+        if (!response.ok) {
+          setError(data.error || "Unable to load work.");
+          setWork(null);
+          return;
+        }
+
+        setError("");
+        setWork(data);
+      }
+    }
+
+    setError("");
+    setWork(null);
+    loadWork();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, fetchImpl, objectId]);
 
   return (
     <RouteFrame
       eyebrow="[viewer]"
-      title={`Work ${objectId}`}
-      description="The object viewer will render here with image-first inspection tools."
-    />
+      title={work?.title || `Work ${objectId}`}
+      description={
+        error
+          ? error
+          : work
+          ? "The object viewer will render here with image-first inspection tools."
+          : "Loading work detail from the Met collection through ARTCTL."
+      }
+    >
+      {work ? (
+        <div className="work-viewer">
+          <figure className="work-image-frame">
+            {work.imageUrl ? (
+              <img className="work-image" src={work.imageUrl} alt={work.title} />
+            ) : (
+              <p className="work-image-unavailable">Image unavailable through the Met API.</p>
+            )}
+          </figure>
+          <section className="work-metadata" aria-label="Work metadata">
+            <dl className="work-metadata-list">
+              <div>
+                <dt>Artist</dt>
+                <dd>{work.artist}</dd>
+              </div>
+              <div>
+                <dt>Date</dt>
+                <dd>{work.date}</dd>
+              </div>
+              <div>
+                <dt>Context</dt>
+                <dd>{work.context}</dd>
+              </div>
+            </dl>
+            <a href={work.metUrl} target="_blank" rel="noreferrer">
+              View on the Met
+            </a>
+          </section>
+        </div>
+      ) : null}
+    </RouteFrame>
   );
 }
 
@@ -225,7 +316,10 @@ function AppShell({ shell, apiBaseUrl, fetchImpl, themeName, onThemeChange }) {
           path="/search"
           element={<SearchPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
         />
-        <Route path="/works/:objectId" element={<WorkPage />} />
+        <Route
+          path="/works/:objectId"
+          element={<WorkPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+        />
         <Route path="/help" element={<HelpPage />} />
         <Route
           path="/themes"

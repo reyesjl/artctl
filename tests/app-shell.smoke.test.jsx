@@ -5,7 +5,17 @@ import httpMocks from "node-mocks-http";
 import { App } from "../src/App.jsx";
 import { createArtctlApp } from "../server/app.js";
 
-function createFetchImpl({ requestLog = [], metClient } = {}) {
+const defaultMetClient = {
+  async searchCollection(query) {
+    return { query, results: [] };
+  },
+
+  async getWork() {
+    return null;
+  }
+};
+
+function createFetchImpl({ requestLog = [], metClient = defaultMetClient } = {}) {
   const apiApp = createArtctlApp({ metClient });
 
   return async function fetchImpl(resource) {
@@ -201,6 +211,123 @@ test("loading a populated search URL restores the same search context", async ()
     "/works/437329"
   );
   expect(requests).toContain("/api/search?q=harvesters");
+});
+
+test("search route shows an error message when Express cannot load Met results", async () => {
+  const metClient = {
+    async searchCollection() {
+      throw new Error("Met API returned a non-JSON search response.");
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=sunflowers");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByDisplayValue("sunflowers")).toBeInTheDocument();
+  expect(
+    await screen.findByText("Met API returned a non-JSON search response.")
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Sunflowers" })).not.toBeInTheDocument();
+});
+
+test("direct entry to a work route loads detail through Express and renders the work title", async () => {
+  const requests = [];
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  expect(
+    await screen.findByRole("heading", { name: "The Great Wave off Kanagawa" })
+  ).toBeInTheDocument();
+  expect(requests).toContain("/api/works/436121");
+});
+
+test("work viewer renders the preferred image and compact metadata with a Met link", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(
+    await screen.findByRole("img", { name: "The Great Wave off Kanagawa" })
+  ).toHaveAttribute("src", "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg");
+  expect(screen.getByText("Japanese")).toBeInTheDocument();
+  expect(screen.getByText("ca. 1830-32")).toBeInTheDocument();
+  expect(
+    screen.getByText("Print - Polychrome woodblock print; ink and color on paper")
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
+    "href",
+    "https://www.metmuseum.org/art/collection/search/45434"
+  );
+});
+
+test("work viewer shows metadata when the Met API has no image for the object", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "Galisteo Creek",
+        artist: "Gustave Baumann",
+        date: "1920",
+        context: "Color woodcut - Ink and color on paper",
+        imageUrl: "",
+        metUrl: "https://www.metmuseum.org/art/collection/search/486055"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/486055");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("heading", { name: "Galisteo Creek" })).toBeInTheDocument();
+  expect(screen.getByText("Image unavailable through the Met API.")).toBeInTheDocument();
+  expect(screen.queryByRole("img", { name: "Galisteo Creek" })).not.toBeInTheDocument();
+  expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
+    "href",
+    "https://www.metmuseum.org/art/collection/search/486055"
+  );
+});
+
+test("work viewer shows a not found message when Express cannot load the object", async () => {
+  const metClient = {
+    async getWork() {
+      return null;
+    }
+  };
+
+  window.history.pushState({}, "", "/works/999999");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("heading", { name: "Work 999999" })).toBeInTheDocument();
+  expect(await screen.findByText("Work not found.")).toBeInTheDocument();
+  expect(screen.queryByRole("img")).not.toBeInTheDocument();
 });
 
 test("help route explains usage, provenance, and the analysis views", async () => {
