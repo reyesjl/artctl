@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import express from "express";
+import { createMetApiClient } from "./met-api.js";
 
 const defaultSpaHtmlPath = path.resolve(process.cwd(), "index.html");
 
@@ -9,6 +10,7 @@ function readSpaHtml(spaHtmlPath) {
 }
 
 export function createArtctlApp({
+  metClient = createMetApiClient(),
   serveSpa = true,
   spaHtmlPath = defaultSpaHtmlPath,
   staticDir = null
@@ -26,6 +28,20 @@ export function createArtctlApp({
         { href: "/themes", label: "Themes" }
       ]
     });
+  });
+
+  app.get("/api/search", async (request, response) => {
+    const query = request.query.q?.trim();
+
+    if (!query) {
+      response.status(400).json({
+        error: "Query is required."
+      });
+      return;
+    }
+
+    const results = await metClient.searchCollection(query);
+    response.json(results);
   });
 
   if (staticDir) {

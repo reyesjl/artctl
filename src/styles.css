@@ -7,15 +7,26 @@
     Consolas,
     "Liberation Mono",
     monospace;
-  --bg: #070b12;
-  --surface: #0d1320;
-  --surface-2: #101827;
-  --border: #26344d;
-  --border-strong: #3a5278;
-  --text: #e6f1ff;
-  --text-muted: #7f94bd;
-  --accent: #2f9bff;
   --content-width: 896px;
+  --background: 220 20% 4%;
+  --foreground: 60 10% 85%;
+  --card: 220 18% 7%;
+  --card-foreground: 60 10% 85%;
+  --popover: 220 18% 7%;
+  --popover-foreground: 60 10% 85%;
+  --primary: 145 60% 45%;
+  --primary-foreground: 220 20% 4%;
+  --secondary: 220 15% 14%;
+  --secondary-foreground: 60 10% 75%;
+  --muted: 220 15% 12%;
+  --muted-foreground: 220 10% 50%;
+  --accent: 35 90% 55%;
+  --accent-foreground: 220 20% 4%;
+  --destructive: 0 70% 55%;
+  --destructive-foreground: 60 10% 90%;
+  --border: 220 15% 18%;
+  --input: 220 15% 14%;
+  --ring: 145 60% 45%;
 }
 
 * {
@@ -25,8 +36,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
 }
 
 a {
@@ -47,7 +58,7 @@ a {
 .app-header,
 .status-line {
   width: 100%;
-  background: var(--surface);
+  background: hsl(var(--card));
 }
 
 .app-header {
@@ -57,7 +68,7 @@ a {
   justify-content: flex-start;
   gap: 12px 16px;
   align-items: center;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid hsl(var(--border));
 }
 
 .brand-block {
@@ -72,7 +83,7 @@ a {
 .tagline,
 .eyebrow,
 .status-line {
-  color: var(--text-muted);
+  color: hsl(var(--muted-foreground));
   font-size: 12px;
 }
 
@@ -86,17 +97,19 @@ a {
 .nav-link {
   display: inline-block;
   padding: 2px 8px;
-  color: var(--text-muted);
+  color: hsl(var(--muted-foreground));
   background: transparent;
+  border: 1px solid transparent;
 }
 
 .nav-link:hover {
-  color: var(--text);
+  color: hsl(var(--foreground));
 }
 
 .nav-link.active {
-  color: var(--accent);
-  background: #163252;
+  color: hsl(var(--foreground));
+  background: hsl(var(--secondary));
+  border-color: hsl(var(--border));
 }
 
 .app-main {
@@ -106,9 +119,10 @@ a {
 }
 
 .panel {
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
   padding: 8px 12px;
+  color: hsl(var(--card-foreground));
 }
 
 .panel h1,
@@ -127,8 +141,103 @@ a {
   line-height: 1.5;
 }
 
+.search-form,
+.search-results {
+  margin-top: 16px;
+}
+
+.search-label {
+  display: block;
+  margin-bottom: 8px;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
+.search-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search-input,
+.search-button {
+  border: 1px solid hsl(var(--input));
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  font: inherit;
+}
+
+.search-input {
+  flex: 1 1 320px;
+  min-height: 40px;
+  padding: 10px 12px;
+}
+
+.search-button {
+  min-height: 40px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+.search-results {
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.search-result {
+  padding: 12px 0;
+  border-bottom: 1px solid hsl(var(--border));
+}
+
+.search-result a {
+  color: hsl(var(--primary));
+}
+
+.manual-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid hsl(var(--border));
+}
+
+.manual-section h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.theme-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.theme-option {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--secondary));
+  color: hsl(var(--foreground));
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-option.active {
+  border-color: hsl(var(--primary));
+}
+
+.theme-option-name {
+  font-size: 14px;
+}
+
+.theme-option-preview {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+}
+
 .status-line {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid hsl(var(--border));
   padding: 12px 16px;
   text-align: center;
 }

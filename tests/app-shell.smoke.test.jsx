@@ -1,39 +1,69 @@
 import { EventEmitter } from "node:events";
 import { beforeEach, expect, test } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import httpMocks from "node-mocks-http";
 import { App } from "../src/App.jsx";
 import { createArtctlApp } from "../server/app.js";
 
-const apiApp = createArtctlApp();
+function createFetchImpl({ requestLog = [], metClient } = {}) {
+  const apiApp = createArtctlApp({ metClient });
+
+  return async function fetchImpl(resource) {
+    const url = new URL(resource, "http://artctl.test");
+    requestLog.push(url.pathname + url.search);
+
+    const request = httpMocks.createRequest({
+      method: "GET",
+      url: url.pathname,
+      query: Object.fromEntries(url.searchParams.entries())
+    });
+    const response = httpMocks.createResponse({ eventEmitter: EventEmitter });
+
+    await new Promise((resolve, reject) => {
+      response.on("end", resolve);
+      response.on("error", reject);
+      apiApp.handle(request, response, reject);
+    });
+
+    return {
+      ok: response.statusCode >= 200 && response.statusCode < 300,
+      status: response.statusCode,
+      async json() {
+        return JSON.parse(response._getData());
+      }
+    };
+  };
+}
+
+const fetchImpl = createFetchImpl();
+const storage = new Map();
+
+function installLocalStorage() {
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem(key) {
+        return storage.has(key) ? storage.get(key) : null;
+      },
+      setItem(key, value) {
+        storage.set(key, String(value));
+      },
+      removeItem(key) {
+        storage.delete(key);
+      },
+      clear() {
+        storage.clear();
+      }
+    }
+  });
+}
 
 beforeEach(() => {
   cleanup();
+  installLocalStorage();
+  window.localStorage.clear();
   window.history.pushState({}, "", "/");
 });
-
-async function fetchImpl(resource) {
-  const url = new URL(resource, "http://artctl.test");
-  const request = httpMocks.createRequest({
-    method: "GET",
-    url: url.pathname
-  });
-  const response = httpMocks.createResponse({ eventEmitter: EventEmitter });
-
-  await new Promise((resolve, reject) => {
-    response.on("end", resolve);
-    response.on("error", reject);
-    apiApp.handle(request, response, reject);
-  });
-
-  return {
-    ok: response.statusCode >= 200 && response.statusCode < 300,
-    status: response.statusCode,
-    async json() {
-      return JSON.parse(response._getData());
-    }
-  };
-}
 
 test("homepage loads the persistent app shell from the Express backend", async () => {
   render(<App fetchImpl={fetchImpl} />);
@@ -41,7 +71,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(await screen.findByText("ARTCTL")).toBeInTheDocument();
   expect(screen.queryByText("[ARTCTL]")).not.toBeInTheDocument();
   expect(screen.queryByText("Met collection terminal viewer")).not.toBeInTheDocument();
-  expect(document.documentElement.dataset.theme).toBe("dark");
+  expect(document.documentElement.dataset.theme).toBe("dark-green");
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
@@ -77,4 +107,181 @@ test("current route marks only the active nav link", async () => {
 
   expect(searchLink).toHaveClass("active");
   expect(galleryLink).not.toHaveClass("active");
+});
+
+test("search route shows an empty state before any query is submitted", async () => {
+  const requests = [];
+  window.history.pushState({}, "", "/search");
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
+
+  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(
+    screen.getByText("Enter a Met search query to begin browsing works.")
+  ).toBeInTheDocument();
+  expect(requests).toEqual(["/api/app-shell"]);
+});
+
+test("submitting a valid query fetches search results through Express and renders work links", async () => {
+  const requests = [];
+  const metClient = {
+    async searchCollection(query) {
+      return {
+        query,
+        results: [
+          {
+            objectId: 436524,
+            title: "Sunflowers",
+            artist: "Vincent van Gogh",
+            date: "1887"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  fireEvent.change(await screen.findByLabelText("Query"), {
+    target: { value: "sunflowers" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  expect(await screen.findByRole("link", { name: "Sunflowers" })).toHaveAttribute(
+    "href",
+    "/works/436524"
+  );
+  expect(window.location.search).toBe("?q=sunflowers");
+  expect(requests).toContain("/api/search?q=sunflowers");
+});
+
+test("submitting a whitespace-only query keeps the search route in its empty state", async () => {
+  const requests = [];
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
+
+  fireEvent.change(await screen.findByLabelText("Query"), {
+    target: { value: "   " }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  expect(
+    screen.getByText("Enter a Met search query to begin browsing works.")
+  ).toBeInTheDocument();
+  expect(window.location.search).toBe("");
+  expect(requests).toEqual(["/api/app-shell"]);
+});
+
+test("loading a populated search URL restores the same search context", async () => {
+  const requests = [];
+  const metClient = {
+    async searchCollection(query) {
+      return {
+        query,
+        results: [
+          {
+            objectId: 437329,
+            title: "The Harvesters",
+            artist: "Pieter Bruegel the Elder",
+            date: "1565"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=harvesters");
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  expect(await screen.findByDisplayValue("harvesters")).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "The Harvesters" })).toHaveAttribute(
+    "href",
+    "/works/437329"
+  );
+  expect(requests).toContain("/api/search?q=harvesters");
+});
+
+test("help route explains usage, provenance, and the analysis views", async () => {
+  window.history.pushState({}, "", "/help");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
+  expect(screen.getByText("How to use ARTCTL")).toBeInTheDocument();
+  expect(screen.getByText(/browse the gallery, run a search, and open a work/i)).toBeInTheDocument();
+  expect(screen.getByText("Provenance")).toBeInTheDocument();
+  expect(screen.getByText(/works come from the metropolitan museum of art/i)).toBeInTheDocument();
+  expect(screen.getByText("Analysis views")).toBeInTheDocument();
+  expect(screen.getByText(/edges, detail, and composition/i)).toBeInTheDocument();
+});
+
+test("themes route previews the built-in themes and lets the user activate one", async () => {
+  window.history.pushState({}, "", "/themes");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Themes" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Green" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Light" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Blue" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Purple" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Red" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Orange" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Cyan" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Dark Pink" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Windows 95" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Windows XP" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "CRT Amber" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Solarized" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sepia" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
+
+  expect(document.documentElement.dataset.theme).toBe("solarized");
+});
+
+test("activating a Cortex theme applies the original Cortex token values", async () => {
+  window.history.pushState({}, "", "/themes");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Solarized" }));
+
+  expect(document.documentElement.style.getPropertyValue("--background")).toBe("192 81% 9%");
+  expect(document.documentElement.style.getPropertyValue("--primary")).toBe("68 100% 30%");
+  expect(document.documentElement.style.getPropertyValue("--border")).toBe("192 50% 22%");
+});
+
+test("choosing a theme stores the preference locally in the browser", async () => {
+  window.history.pushState({}, "", "/themes");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Dark Cyan" }));
+
+  expect(window.localStorage.getItem("artctl-theme")).toBe("dark-cyan");
+});
+
+test("app startup restores the previously chosen theme from browser storage", async () => {
+  window.localStorage.setItem("artctl-theme", "crt-amber");
+  window.history.pushState({}, "", "/help");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
+  expect(document.documentElement.dataset.theme).toBe("crt-amber");
+});
+
+test("the active theme remains applied when navigating to another route", async () => {
+  window.history.pushState({}, "", "/themes");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Windows XP" }));
+  fireEvent.click(screen.getByRole("link", { name: "[help]" }));
+
+  expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
+  expect(document.documentElement.dataset.theme).toBe("windows-xp");
 });
