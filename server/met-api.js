@@ -2,6 +2,7 @@ const metApiBaseUrl = "https://collectionapi.metmuseum.org/public/collection/v1"
 const defaultCacheTtlMs = 5 * 60 * 1000;
 const defaultRequestTimeoutMs = 8 * 1000;
 const defaultMaxRetries = 1;
+const searchPageSize = 12;
 const galleryPageSize = 24;
 const galleryBatchSize = 24;
 
@@ -93,6 +94,66 @@ function isRetryableError(error) {
   );
 }
 
+function normalizePositiveInteger(value, defaultValue = 1) {
+  const parsedValue = Number.parseInt(value ?? "", 10);
+
+  return Number.isNaN(parsedValue) || parsedValue < 1 ? defaultValue : parsedValue;
+}
+
+function normalizeSearchState(input) {
+  if (typeof input === "string") {
+    return {
+      query: input.trim(),
+      departmentId: null,
+      medium: "",
+      page: 1
+    };
+  }
+
+  return {
+    query: input?.query?.trim() ?? "",
+    departmentId:
+      input?.departmentId == null ? null : normalizePositiveInteger(input.departmentId, null),
+    medium: input?.medium?.trim() ?? "",
+    page: normalizePositiveInteger(input?.page)
+  };
+}
+
+function buildSearchCacheKey(searchState) {
+  return JSON.stringify([
+    searchState.query,
+    searchState.departmentId,
+    searchState.medium,
+    searchState.page
+  ]);
+}
+
+const curatedMediumMatchers = {
+  paintings: ["painting"],
+  drawings: ["drawing"],
+  prints: ["print"],
+  photos: ["photograph", "photo"],
+  sculpture: ["sculpture"],
+  oil: ["oil"],
+  paper: ["paper"],
+  canvas: ["canvas"],
+  metal: ["metal", "bronze", "silver", "gold", "iron", "steel", "copper"],
+  wood: ["wood", "woodblock", "woodcut"]
+};
+
+function matchesCuratedMedium(object, medium) {
+  if (!medium) {
+    return true;
+  }
+
+  const keywords = curatedMediumMatchers[medium] ?? [medium];
+  const haystack = [object?.medium, object?.objectName]
+    .map((value) => value?.toLowerCase() ?? "")
+    .join(" ");
+
+  return keywords.some((keyword) => haystack.includes(keyword));
+}
+
 export function createMetApiClient({
   fetchImpl = fetch,
   cacheTtlMs = defaultCacheTtlMs,
@@ -101,6 +162,7 @@ export function createMetApiClient({
 } = {}) {
   const searchCache = new Map();
   const galleryCache = new Map();
+  const departmentCache = new Map();
   const cookieJar = new Map();
 
   function getCachedValue(cache, key) {
@@ -265,8 +327,11 @@ export function createMetApiClient({
   }
 
   return {
-    async searchCollection(query) {
-      const cachedResult = getCachedValue(searchCache, query);
+    async searchCollection(input) {
+      const searchState = normalizeSearchState(input);
+      const { query, departmentId, medium } = searchState;
+      const cacheKey = buildSearchCacheKey(searchState);
+      const cachedResult = getCachedValue(searchCache, cacheKey);
 
       if (cachedResult) {
         return cachedResult;
@@ -276,27 +341,71 @@ export function createMetApiClient({
       searchUrl.searchParams.set("hasImages", "true");
       searchUrl.searchParams.set("q", query);
 
+      if (departmentId != null) {
+        searchUrl.searchParams.set("departmentId", String(departmentId));
+      }
+
       const searchPayload = await readJson(searchUrl, {
         errorMessage: "Met API returned a non-JSON search response."
       });
-      const objectIds = searchPayload.objectIDs?.slice(0, 12) ?? [];
+      const objectIds = searchPayload.objectIDs ?? [];
+      const firstResultIndex = (searchState.page - 1) * searchPageSize;
+      const lastResultIndex = firstResultIndex + searchPageSize;
 
       if (objectIds.length === 0) {
         return { query, results: [] };
       }
 
-      const objectPayloads = await Promise.all(
-        objectIds.map((objectId) => fetchObject(objectId, { optional: true }))
-      );
+      const matchingObjects = [];
+
+      for (
+        let index = 0;
+        index < objectIds.length && matchingObjects.length < lastResultIndex;
+        index += searchPageSize
+      ) {
+        const objectPayloads = await Promise.all(
+          objectIds
+            .slice(index, index + searchPageSize)
+            .map((objectId) => fetchObject(objectId, { optional: true }))
+        );
+
+        matchingObjects.push(
+          ...objectPayloads
+            .filter((object) => object?.objectID && object?.title)
+            .filter((object) => matchesCuratedMedium(object, medium))
+        );
+      }
 
       const result = {
         query,
-        results: objectPayloads
-          .filter((object) => object?.objectID && object?.title)
+        results: matchingObjects
+          .slice(firstResultIndex, lastResultIndex)
           .map(normalizeSearchResult)
       };
 
-      setCachedValue(searchCache, query, result);
+      setCachedValue(searchCache, cacheKey, result);
+
+      return result;
+    },
+
+    async getDepartments() {
+      const cacheKey = "departments";
+      const cachedResult = getCachedValue(departmentCache, cacheKey);
+
+      if (cachedResult) {
+        return cachedResult;
+      }
+
+      const departmentsPayload = await readJson(`${metApiBaseUrl}/departments`, {
+        errorMessage: "Met API returned a non-JSON departments response."
+      });
+      const result = {
+        departments: (departmentsPayload.departments ?? []).filter(
+          (department) => department?.departmentId && department?.displayName
+        )
+      };
+
+      setCachedValue(departmentCache, cacheKey, result);
 
       return result;
     },

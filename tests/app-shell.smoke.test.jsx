@@ -6,6 +6,10 @@ import { App } from "../src/App.jsx";
 import { createArtctlApp } from "../server/app.js";
 
 const defaultMetClient = {
+  async getDepartments() {
+    return { departments: [] };
+  },
+
   async getGalleryPage() {
     return { results: [] };
   },
@@ -183,7 +187,131 @@ test("search route shows an empty state before any query is submitted", async ()
 
   expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
   expect(screen.getByText("Enter a search to find works.")).toBeInTheDocument();
-  expect(requests).toEqual(["/api/app-shell"]);
+  expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
+});
+
+test("search route loads Department filter options from Express", async () => {
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: [
+          { departmentId: 11, displayName: "European Paintings" },
+          { departmentId: 6, displayName: "Arms and Armor" }
+        ]
+      };
+    },
+
+    async searchCollection(searchState) {
+      return { query: searchState.query, results: [] };
+    }
+  };
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByLabelText("Department")).toBeInTheDocument();
+  expect(screen.getByRole("option", { name: "All departments" })).toBeInTheDocument();
+  expect(await screen.findByRole("option", { name: "European Paintings" })).toHaveValue("11");
+  expect(await screen.findByRole("option", { name: "Arms and Armor" })).toHaveValue("6");
+});
+
+test("submitting search with Department and Medium filters preserves the search state", async () => {
+  let receivedSearchState = null;
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: [{ departmentId: 11, displayName: "European Paintings" }]
+      };
+    },
+
+    async searchCollection(searchState) {
+      receivedSearchState = searchState;
+
+      return {
+        query: searchState.query,
+        results: [
+          {
+            objectId: 436121,
+            title: "Landscape Study",
+            artist: "Artist",
+            date: "1900"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  fireEvent.change(await screen.findByLabelText("Query"), {
+    target: { value: "landscape" }
+  });
+  fireEvent.change(await screen.findByLabelText("Department"), {
+    target: { value: "11" }
+  });
+  fireEvent.change(screen.getByLabelText("Medium"), {
+    target: { value: "wood" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  expect(await screen.findByRole("link", { name: "Landscape Study" })).toHaveAttribute(
+    "href",
+    "/works/436121"
+  );
+  expect(window.location.search).toBe("?q=landscape&departmentId=11&medium=wood");
+  expect(receivedSearchState).toEqual({
+    query: "landscape",
+    departmentId: 11,
+    medium: "wood",
+    page: 1
+  });
+});
+
+test("search results support explicit next-page navigation", async () => {
+  const metClient = {
+    async getDepartments() {
+      return { departments: [] };
+    },
+
+    async searchCollection(searchState) {
+      if (searchState.page === 2) {
+        return {
+          query: searchState.query,
+          results: [
+            {
+              objectId: 13,
+              title: "Work 13",
+              artist: "Artist 13",
+              date: "1900"
+            }
+          ]
+        };
+      }
+
+      return {
+        query: searchState.query,
+        results: Array.from({ length: 12 }, (_, index) => ({
+          objectId: index + 1,
+          title: `Work ${index + 1}`,
+          artist: `Artist ${index + 1}`,
+          date: "1900"
+        }))
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=landscape");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("link", { name: "Work 1" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+
+  expect(await screen.findByRole("link", { name: "Work 13" })).toHaveAttribute(
+    "href",
+    "/works/13"
+  );
+  expect(window.location.search).toBe("?q=landscape&page=2");
 });
 
 test("submitting a valid query fetches search results through Express and renders work links", async () => {
@@ -233,15 +361,18 @@ test("submitting a whitespace-only query keeps the search route in its empty sta
 
   expect(screen.getByText("Enter a search to find works.")).toBeInTheDocument();
   expect(window.location.search).toBe("");
-  expect(requests).toEqual(["/api/app-shell"]);
+  expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
 });
 
-test("loading a populated search URL restores the same search context", async () => {
+test("loading a populated search URL restores the same search state end to end", async () => {
   const requests = [];
+  let receivedSearchState = null;
   const metClient = {
-    async searchCollection(query) {
+    async searchCollection(searchState) {
+      receivedSearchState = searchState;
+
       return {
-        query,
+        query: searchState.query,
         results: [
           {
             objectId: 437329,
@@ -254,7 +385,11 @@ test("loading a populated search URL restores the same search context", async ()
     }
   };
 
-  window.history.pushState({}, "", "/search?q=harvesters");
+  window.history.pushState(
+    {},
+    "",
+    "/search?q=harvesters&departmentId=11&medium=paintings&page=2"
+  );
   render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
 
   expect(await screen.findByDisplayValue("harvesters")).toBeInTheDocument();
@@ -262,7 +397,13 @@ test("loading a populated search URL restores the same search context", async ()
     "href",
     "/works/437329"
   );
-  expect(requests).toContain("/api/search?q=harvesters");
+  expect(requests).toContain("/api/search?q=harvesters&departmentId=11&medium=paintings&page=2");
+  expect(receivedSearchState).toEqual({
+    query: "harvesters",
+    departmentId: 11,
+    medium: "paintings",
+    page: 2
+  });
 });
 
 test("search results show inline availability markers for rights and image status", async () => {

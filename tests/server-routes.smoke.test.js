@@ -246,6 +246,36 @@ describe("work detail API", () => {
 });
 
 describe("search API", () => {
+  test("GET /api/search/departments returns Met department options", async () => {
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.endsWith("/departments")) {
+          return createJsonResponse({
+            departments: [
+              { departmentId: 11, displayName: "European Paintings" },
+              { departmentId: 6, displayName: "Arms and Armor" }
+            ]
+          });
+        }
+
+        throw new Error(`Unexpected Met API request: ${url}`);
+      }
+    });
+    const searchApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/search/departments", searchApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      departments: [
+        { departmentId: 11, displayName: "European Paintings" },
+        { departmentId: 6, displayName: "Arms and Armor" }
+      ]
+    });
+  });
+
   test("GET /api/search returns a JSON error when the Met upstream responds with HTML", async () => {
     const metClient = createMetApiClient({
       async fetchImpl(resource) {
@@ -322,6 +352,117 @@ describe("search API", () => {
       ]
     });
     expect(requests).toHaveLength(2);
+  });
+
+  test("GET /api/search filters results by the curated medium value", async () => {
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.includes("/search?")) {
+          return createJsonResponse({
+            total: 2,
+            objectIDs: [436524, 486055]
+          });
+        }
+
+        if (url.endsWith("/objects/436524")) {
+          return createJsonResponse({
+            objectID: 436524,
+            title: "Sunflowers",
+            artistDisplayName: "Vincent van Gogh",
+            culture: "",
+            objectDate: "1887",
+            medium: "Oil on canvas",
+            primaryImage: "",
+            primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg"
+          });
+        }
+
+        if (url.endsWith("/objects/486055")) {
+          return createJsonResponse({
+            objectID: 486055,
+            title: "Under the Wave off Kanagawa",
+            artistDisplayName: "Katsushika Hokusai",
+            culture: "",
+            objectDate: "1830-32",
+            medium: "Polychrome woodblock print; ink and color on paper",
+            primaryImage: "",
+            primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          });
+        }
+
+        throw new Error(`Unexpected Met API request: ${url}`);
+      }
+    });
+    const searchApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/search?q=wave&medium=wood", searchApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      query: "wave",
+      results: [
+        {
+          objectId: 486055,
+          title: "Under the Wave off Kanagawa",
+          artist: "Katsushika Hokusai",
+          date: "1830-32",
+          imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg",
+          isPublicDomain: false,
+          hasImage: true
+        }
+      ]
+    });
+  });
+
+  test("GET /api/search backfills invalid hydrated objects to keep a full page", async () => {
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.includes("/search?")) {
+          return createJsonResponse({
+            total: 15,
+            objectIDs: Array.from({ length: 15 }, (_, index) => index + 1)
+          });
+        }
+
+        const objectId = Number(url.split("/").at(-1));
+
+        if ([2, 5, 11].includes(objectId)) {
+          return createJsonResponse({
+            objectID: objectId,
+            title: "",
+            artistDisplayName: `Artist ${objectId}`,
+            culture: "",
+            objectDate: "1900",
+            primaryImage: "",
+            primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+          });
+        }
+
+        return createJsonResponse({
+          objectID: objectId,
+          title: `Work ${objectId}`,
+          artistDisplayName: `Artist ${objectId}`,
+          culture: "",
+          objectDate: "1900",
+          primaryImage: "",
+          primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+        });
+      }
+    });
+    const searchApp = createArtctlApp({ metClient });
+
+    const response = await makeRequest("/api/search?q=works&page=1", searchApp);
+    const payload = JSON.parse(response._getData());
+
+    expect(response.statusCode).toBe(200);
+    expect(payload.results).toHaveLength(12);
+    expect(payload.results.map((result) => result.objectId)).toEqual([
+      1, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15
+    ]);
   });
 
   test("GET /api/search returns explicit public-domain and image-availability flags", async () => {

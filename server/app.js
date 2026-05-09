@@ -9,6 +9,12 @@ function readSpaHtml(spaHtmlPath) {
   return readFileSync(spaHtmlPath, "utf8");
 }
 
+function normalizePositiveInteger(value, defaultValue = 1) {
+  const parsedValue = Number.parseInt(value ?? "", 10);
+
+  return Number.isNaN(parsedValue) || parsedValue < 1 ? defaultValue : parsedValue;
+}
+
 export function createArtctlApp({
   metClient = createMetApiClient(),
   serveSpa = true,
@@ -32,6 +38,9 @@ export function createArtctlApp({
 
   app.get("/api/search", async (request, response) => {
     const query = request.query.q?.trim();
+    const departmentId = request.query.departmentId?.trim();
+    const medium = request.query.medium?.trim() ?? "";
+    const page = normalizePositiveInteger(request.query.page);
 
     if (!query) {
       response.status(400).json({
@@ -41,8 +50,24 @@ export function createArtctlApp({
     }
 
     try {
-      const results = await metClient.searchCollection(query);
+      const results = await metClient.searchCollection({
+        query,
+        departmentId: departmentId ? normalizePositiveInteger(departmentId, null) : null,
+        medium,
+        page
+      });
       response.json(results);
+    } catch (error) {
+      response.status(502).json({
+        error: error.message
+      });
+    }
+  });
+
+  app.get("/api/search/departments", async (_request, response) => {
+    try {
+      const departments = await metClient.getDepartments();
+      response.json(departments);
     } catch (error) {
       response.status(502).json({
         error: error.message
