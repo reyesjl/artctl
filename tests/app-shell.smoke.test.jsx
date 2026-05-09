@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
 import { beforeEach, expect, test } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import httpMocks from "node-mocks-http";
 import { App } from "../src/App.jsx";
 import { createArtctlApp } from "../server/app.js";
+import { THEMES } from "../src/themes.js";
 
 const defaultMetClient = {
   async getDepartments() {
@@ -115,6 +116,29 @@ test.each([
   expect(screen.getByRole("link", { name: "[themes]" })).toBeInTheDocument();
 });
 
+test("search route keeps its content inside a themed route frame within the shared shell", async () => {
+  window.history.pushState({}, "", "/search");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  const heading = await screen.findByRole("heading", { name: "Search" });
+  const routeFrame = heading.closest("section");
+
+  expect(routeFrame).not.toBeNull();
+  expect(routeFrame).toContainElement(
+    screen.getByText("Live Met-backed search will appear here once a query is submitted.")
+  );
+  expect(routeFrame).toContainElement(screen.getByLabelText("Query"));
+  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
+  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
+  expect(routeFrame).toHaveStyle({
+    backgroundColor: `hsl(${cardColor})`,
+    border: `1px solid hsl(${borderColor})`
+  });
+  expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByText("v0.1.0")).toBeInTheDocument();
+});
+
 test("current route marks only the active nav link", async () => {
   window.history.pushState({}, "", "/search");
 
@@ -164,6 +188,259 @@ test("homepage renders highlighted Met works from Express as gallery links", asy
   expect(requests).toContain("/api/gallery");
 });
 
+test("homepage appends the next gallery batch in place when Load More is selected", async () => {
+  const requests = [];
+  const metClient = {
+    async getGalleryPage({ page = 1 } = {}) {
+      const startId = page === 1 ? 1 : 25;
+      const endId = page === 1 ? 24 : 48;
+
+      return {
+        hasMore: page < 2,
+        results: Array.from({ length: endId - startId + 1 }, (_, index) => {
+          const objectId = startId + index;
+
+          return {
+            objectId,
+            title: `Work ${objectId}`,
+            artist: `Artist ${objectId}`,
+            imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+          };
+        })
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  expect((await screen.findByText("Work 1")).closest("a")).toHaveAttribute("href", "/works/1");
+  expect(screen.queryByText("Work 25")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+
+  expect((await screen.findByText("Work 25")).closest("a")).toHaveAttribute("href", "/works/25");
+  expect(screen.getByText("Work 48").closest("a")).toHaveAttribute("href", "/works/48");
+  expect(window.location.search).toBe("?page=2");
+  expect(requests).toContain("/api/gallery?page=2");
+});
+
+test("homepage shuffle starts a seeded gallery order from the top", async () => {
+  const requests = [];
+  const metClient = {
+    async getGalleryPage({ shuffle = "" } = {}) {
+      const objectIds = shuffle
+        ? Array.from({ length: 24 }, (_, index) => 48 - index)
+        : Array.from({ length: 24 }, (_, index) => index + 1);
+
+      return {
+        hasMore: true,
+        results: objectIds.map((objectId) => ({
+          objectId,
+          title: `Work ${objectId}`,
+          artist: `Artist ${objectId}`,
+          imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+        }))
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  expect(await screen.findByText("Work 1")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Shuffle" }));
+
+  expect(await screen.findByText("Work 48")).toBeInTheDocument();
+  expect(screen.queryByText("Work 1")).not.toBeInTheDocument();
+  expect(window.location.search).toMatch(/^\?shuffle=/);
+  expect(requests.some((request) => request.startsWith("/api/gallery?shuffle="))).toBe(true);
+});
+
+test("homepage restores shuffled gallery extent from the URL and after browser back", async () => {
+  const requests = [];
+  const metClient = {
+    async getGalleryPage({ page = 1, shuffle = "" } = {}) {
+      const startId = page === 1 ? 41 : 65;
+      const endId = page === 1 ? 64 : 88;
+
+      return {
+        hasMore: page < 2,
+        results: Array.from({ length: endId - startId + 1 }, (_, index) => {
+          const objectId = startId + index;
+
+          return {
+            objectId,
+            title: shuffle ? `Shuffle Work ${objectId}` : `Work ${objectId}`,
+            artist: `Artist ${objectId}`,
+            imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+          };
+        })
+      };
+    },
+
+    async getWork(objectId) {
+      return {
+        objectId: Number(objectId),
+        title: `Shuffle Work ${objectId}`,
+        artist: `Artist ${objectId}`,
+        date: "1900",
+        context: "Object context unavailable",
+        imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`,
+        metUrl: `https://www.metmuseum.org/art/collection/search/${objectId}`
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/?page=2&shuffle=seeded-order");
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  expect(await screen.findByText("Shuffle Work 41")).toBeInTheDocument();
+  expect(await screen.findByText("Shuffle Work 88")).toBeInTheDocument();
+  expect(requests).toContain("/api/gallery?shuffle=seeded-order");
+  expect(requests).toContain("/api/gallery?page=2&shuffle=seeded-order");
+
+  fireEvent.click(screen.getByText("Shuffle Work 41").closest("a"));
+
+  expect(await screen.findByRole("heading", { name: "Shuffle Work 41" })).toBeInTheDocument();
+
+  window.history.back();
+  window.dispatchEvent(new PopStateEvent("popstate"));
+
+  expect(await screen.findByText("Shuffle Work 41")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.getByText("Shuffle Work 88")).toBeInTheDocument();
+    expect(window.location.search).toBe("?page=2&shuffle=seeded-order");
+  });
+});
+
+test("homepage renders gallery cards as themed surfaces while preserving links and copy", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436524,
+            title: "Sunflowers",
+            artist: "Vincent van Gogh",
+            imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg"
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const cardLink = await screen.findByRole("link", { name: /Sunflowers/i });
+  const card = cardLink.closest("li");
+  const title = screen.getByText("Sunflowers");
+  const meta = screen.getByText("Vincent van Gogh");
+  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
+  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
+  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
+  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
+
+  expect(card).not.toBeNull();
+  expect(card).toHaveStyle({
+    backgroundColor: `hsl(${cardColor})`,
+    border: `1px solid hsl(${borderColor})`
+  });
+  expect(cardLink).toHaveAttribute("href", "/works/436524");
+  expect(title).toHaveStyle({
+    color: `hsl(${foregroundColor})`
+  });
+  expect(meta).toHaveStyle({
+    color: `hsl(${mutedColor})`
+  });
+});
+
+test("homepage renders the gallery list as a grid while preserving multiple cards", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          },
+          {
+            objectId: 436524,
+            title: "Sunflowers",
+            artist: "Vincent van Gogh",
+            imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg"
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const firstLink = await screen.findByRole("link", { name: /The Great Wave off Kanagawa/i });
+  const secondLink = screen.getByRole("link", { name: /Sunflowers/i });
+  const grid = firstLink.closest("ul");
+
+  expect(grid).not.toBeNull();
+  expect(grid).toHaveStyle({
+    display: "grid",
+    gap: "16px",
+    padding: "0px",
+    listStyle: "none"
+  });
+  expect(firstLink).toHaveAttribute("href", "/works/436121");
+  expect(secondLink).toHaveAttribute("href", "/works/436524");
+});
+
+test("homepage preserves gallery image and placeholder treatment inside themed media frames", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          },
+          {
+            objectId: 486055,
+            title: "Galisteo Creek",
+            artist: "Susan Rothenberg",
+            imageUrl: ""
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const imageFrame = image.closest("figure");
+  const placeholder = screen.getByText((_, element) =>
+    Boolean(element?.classList.contains("gallery-card-image-placeholder"))
+  );
+  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
+  const mutedColor = document.documentElement.style.getPropertyValue("--muted").trim();
+
+  expect(imageFrame).not.toBeNull();
+  expect(imageFrame).toHaveStyle({
+    backgroundColor: `hsl(${secondaryColor})`
+  });
+  expect(image).toHaveAttribute(
+    "src",
+    "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+  );
+  expect(image).toHaveStyle({
+    width: "100%"
+  });
+  expect(placeholder).toHaveStyle({
+    backgroundColor: `hsl(${mutedColor})`
+  });
+});
+
 test("homepage shows a friendly message when Express cannot load the Met gallery", async () => {
   const metClient = {
     async getGalleryPage() {
@@ -187,7 +464,9 @@ test("search route shows an empty state before any query is submitted", async ()
 
   expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
   expect(screen.getByText("Enter a search to find works.")).toBeInTheDocument();
-  expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
+  await waitFor(() => {
+    expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
+  });
 });
 
 test("search route loads Department filter options from Express", async () => {
@@ -213,6 +492,77 @@ test("search route loads Department filter options from Express", async () => {
   expect(screen.getByRole("option", { name: "All departments" })).toBeInTheDocument();
   expect(await screen.findByRole("option", { name: "European Paintings" })).toHaveValue("11");
   expect(await screen.findByRole("option", { name: "Arms and Armor" })).toHaveValue("6");
+});
+
+test("search route renders themed controls while preserving current submission behavior", async () => {
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: [{ departmentId: 11, displayName: "European Paintings" }]
+      };
+    },
+
+    async searchCollection(searchState) {
+      return {
+        query: searchState.query,
+        results: [
+          {
+            objectId: 436121,
+            title: "Landscape Study",
+            artist: "Artist",
+            date: "1900"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const queryInput = await screen.findByLabelText("Query");
+  const departmentSelect = await screen.findByLabelText("Department");
+  const mediumSelect = screen.getByLabelText("Medium");
+  const searchButton = screen.getByRole("button", { name: "[search]" });
+  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
+  const inputColor = document.documentElement.style.getPropertyValue("--input").trim();
+  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
+
+  expect(queryInput).toHaveStyle({
+    backgroundColor: `hsl(${secondaryColor})`,
+    border: `1px solid hsl(${inputColor})`,
+    color: `hsl(${foregroundColor})`
+  });
+  expect(departmentSelect).toHaveStyle({
+    backgroundColor: `hsl(${secondaryColor})`,
+    border: `1px solid hsl(${inputColor})`
+  });
+  expect(mediumSelect).toHaveStyle({
+    backgroundColor: `hsl(${secondaryColor})`,
+    border: `1px solid hsl(${inputColor})`
+  });
+  expect(searchButton).toHaveStyle({
+    backgroundColor: `hsl(${secondaryColor})`,
+    border: `1px solid hsl(${inputColor})`,
+    color: `hsl(${foregroundColor})`
+  });
+
+  fireEvent.change(queryInput, {
+    target: { value: "landscape" }
+  });
+  fireEvent.change(departmentSelect, {
+    target: { value: "11" }
+  });
+  fireEvent.change(mediumSelect, {
+    target: { value: "wood" }
+  });
+  fireEvent.click(searchButton);
+
+  expect(await screen.findByRole("link", { name: "Landscape Study" })).toHaveAttribute(
+    "href",
+    "/works/436121"
+  );
+  expect(window.location.search).toBe("?q=landscape&departmentId=11&medium=wood");
 });
 
 test("submitting search with Department and Medium filters preserves the search state", async () => {
@@ -244,14 +594,26 @@ test("submitting search with Department and Medium filters preserves the search 
   window.history.pushState({}, "", "/search");
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
-  fireEvent.change(await screen.findByLabelText("Query"), {
+  const queryInput = await screen.findByLabelText("Query");
+  fireEvent.change(queryInput, {
     target: { value: "landscape" }
   });
-  fireEvent.change(await screen.findByLabelText("Department"), {
+  await waitFor(() => {
+    expect(queryInput).toHaveValue("landscape");
+  });
+  const departmentInput = await screen.findByLabelText("Department");
+  fireEvent.change(departmentInput, {
     target: { value: "11" }
   });
-  fireEvent.change(screen.getByLabelText("Medium"), {
+  await waitFor(() => {
+    expect(departmentInput).toHaveValue("11");
+  });
+  const mediumInput = screen.getByLabelText("Medium");
+  fireEvent.change(mediumInput, {
     target: { value: "wood" }
+  });
+  await waitFor(() => {
+    expect(mediumInput).toHaveValue("wood");
   });
   fireEvent.click(screen.getByRole("button", { name: "[search]" }));
 
@@ -314,6 +676,64 @@ test("search results support explicit next-page navigation", async () => {
   expect(window.location.search).toBe("?q=landscape&page=2");
 });
 
+test("search pagination renders as a themed control surface while preserving page navigation", async () => {
+  const metClient = {
+    async getDepartments() {
+      return { departments: [] };
+    },
+
+    async searchCollection(searchState) {
+      if (searchState.page === 2) {
+        return {
+          query: searchState.query,
+          results: [
+            {
+              objectId: 13,
+              title: "Work 13",
+              artist: "Artist 13",
+              date: "1900"
+            }
+          ]
+        };
+      }
+
+      return {
+        query: searchState.query,
+        results: Array.from({ length: 12 }, (_, index) => ({
+          objectId: index + 1,
+          title: `Work ${index + 1}`,
+          artist: `Artist ${index + 1}`,
+          date: "1900"
+        }))
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=landscape");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const nextButton = await screen.findByRole("button", { name: "Next page" });
+  const pageLabel = screen.getByText("Page 1");
+  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
+  const inputColor = document.documentElement.style.getPropertyValue("--input").trim();
+  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
+  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
+
+  expect(nextButton).toHaveStyle({
+    backgroundColor: `hsl(${secondaryColor})`,
+    border: `1px solid hsl(${inputColor})`,
+    color: `hsl(${foregroundColor})`
+  });
+  expect(pageLabel).toHaveStyle({
+    color: `hsl(${mutedColor})`
+  });
+
+  fireEvent.click(nextButton);
+
+  expect(await screen.findByRole("link", { name: "Work 13" })).toHaveAttribute("href", "/works/13");
+  expect(window.location.search).toBe("?q=landscape&page=2");
+});
+
 test("submitting a valid query fetches search results through Express and renders work links", async () => {
   const requests = [];
   const metClient = {
@@ -335,8 +755,12 @@ test("submitting a valid query fetches search results through Express and render
   window.history.pushState({}, "", "/search");
   render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
 
-  fireEvent.change(await screen.findByLabelText("Query"), {
+  const searchInput = await screen.findByLabelText("Query");
+  fireEvent.change(searchInput, {
     target: { value: "sunflowers" }
+  });
+  await waitFor(() => {
+    expect(searchInput).toHaveValue("sunflowers");
   });
   fireEvent.click(screen.getByRole("button", { name: "[search]" }));
 
@@ -444,6 +868,58 @@ test("search results show inline availability markers for rights and image statu
   expect(screen.getByText("No Image Available")).toBeInTheDocument();
 });
 
+test("search results render as a themed list while preserving result-link behavior", async () => {
+  const metClient = {
+    async searchCollection(query) {
+      return {
+        query,
+        results: [
+          {
+            objectId: 486055,
+            title: "Galisteo Creek",
+            artist: "Susan Rothenberg",
+            date: "1992",
+            imageUrl: "",
+            isPublicDomain: false,
+            hasImage: false
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=rothenberg");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const resultLink = await screen.findByRole("link", { name: "Galisteo Creek" });
+  const resultsList = resultLink.closest("ul");
+  const resultRow = resultLink.closest("li");
+  const restrictedFlag = screen.getByText("Rights Restricted");
+  const noImageFlag = screen.getByText("No Image Available");
+  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
+  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
+  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
+
+  expect(resultsList).not.toBeNull();
+  expect(resultRow).not.toBeNull();
+  expect(resultsList).toHaveStyle({
+    borderTop: `1px solid hsl(${borderColor})`
+  });
+  expect(resultRow).toHaveStyle({
+    borderBottom: `1px solid hsl(${borderColor})`
+  });
+  expect(resultLink).toHaveAttribute("href", "/works/486055");
+  expect(resultLink).toHaveStyle({
+    color: `hsl(${primaryColor})`
+  });
+  expect(restrictedFlag).toHaveStyle({
+    color: `hsl(${mutedColor})`
+  });
+  expect(noImageFlag).toHaveStyle({
+    color: `hsl(${mutedColor})`
+  });
+});
+
 test("search route shows an error message when Express cannot load Met results", async () => {
   const metClient = {
     async searchCollection() {
@@ -516,6 +992,112 @@ test("work viewer renders the preferred image and compact metadata with a Met li
     "href",
     "https://www.metmuseum.org/art/collection/search/45434"
   );
+});
+
+test("work viewer renders a themed layout and metadata panel while preserving work details", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const viewer = image.closest("div");
+  const metadata = screen.getByLabelText("Work metadata");
+  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
+  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
+  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
+
+  expect(viewer).not.toBeNull();
+  expect(viewer).toHaveStyle({
+    display: "grid",
+    gap: "16px"
+  });
+  expect(metadata).toHaveStyle({
+    borderTop: `1px solid hsl(${borderColor})`
+  });
+  expect(screen.getByText("Artist")).toHaveStyle({
+    color: `hsl(${mutedColor})`
+  });
+  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveStyle({
+    color: `hsl(${primaryColor})`
+  });
+  expect(screen.getByText("Japanese")).toBeInTheDocument();
+  expect(screen.getByText("ca. 1830-32")).toBeInTheDocument();
+});
+
+test("work viewer preserves image framing inside a themed media surface", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const frame = image.closest("figure");
+  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
+  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
+
+  expect(frame).not.toBeNull();
+  expect(frame).toHaveStyle({
+    border: `1px solid hsl(${borderColor})`,
+    backgroundColor: `hsl(${secondaryColor})`
+  });
+  expect(image).toHaveStyle({
+    display: "block",
+    width: "100%"
+  });
+});
+
+test("work viewer shows a themed unavailable-image state while preserving metadata", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "Galisteo Creek",
+        artist: "Gustave Baumann",
+        date: "1920",
+        context: "Color woodcut - Ink and color on paper",
+        imageUrl: "",
+        metUrl: "https://www.metmuseum.org/art/collection/search/486055"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/486055");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const unavailable = await screen.findByText("Image unavailable through the Met API.");
+  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
+
+  expect(unavailable).toHaveStyle({
+    color: `hsl(${mutedColor})`,
+    textAlign: "center"
+  });
+  expect(screen.queryByRole("img", { name: "Galisteo Creek" })).not.toBeInTheDocument();
+  expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
 });
 
 test("work viewer shows metadata when the Met API has no image for the object", async () => {
@@ -592,6 +1174,31 @@ test("help route presents the current ARTCTL product copy", async () => {
   ).toBeInTheDocument();
 });
 
+test("help route renders a themed reading surface while preserving the manual copy", async () => {
+  window.history.pushState({}, "", "/help");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  await screen.findByRole("heading", { name: "Help" });
+  const manual = screen.getByText("ARTCTL", { selector: ".help-page-manual" });
+  const helpPage = manual.closest("article");
+  const galleryTitle = screen.getByText("── Gallery ──");
+  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
+  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
+  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
+
+  expect(helpPage).toHaveStyle({
+    backgroundColor: `hsl(${cardColor})`,
+    borderColor: `hsl(${borderColor})`
+  });
+  expect(galleryTitle).toHaveStyle({
+    color: `hsl(${primaryColor})`
+  });
+  expect(
+    screen.getByText(/your selected theme persists across gallery, search, help, and artwork views/i)
+  ).toBeInTheDocument();
+});
+
 test("themes route matches the Cortex-style theme picker structure and active state", async () => {
   window.history.pushState({}, "", "/themes");
 
@@ -622,6 +1229,58 @@ test("themes route matches the Cortex-style theme picker structure and active st
   expect(document.documentElement.dataset.theme).toBe("solarized");
   expect(screen.getByRole("button", { name: "Solarized" })).toHaveTextContent("✓");
   expect(screen.getAllByText("✓")).toHaveLength(1);
+});
+
+test("themes route renders a themed picker surface while preserving theme selection behavior", async () => {
+  window.history.pushState({}, "", "/themes");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  const darkGreen = await screen.findByRole("button", { name: "Dark Green" });
+  const solarized = screen.getByRole("button", { name: "Solarized" });
+  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
+  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
+  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
+  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
+
+  expect(darkGreen).toHaveStyle({
+    backgroundColor: `hsl(${primaryColor} / 0.1)`,
+    borderColor: `hsl(${primaryColor})`,
+    color: `hsl(${primaryColor})`
+  });
+  expect(solarized).toHaveStyle({
+    backgroundColor: `hsl(${cardColor})`,
+    borderColor: `hsl(${borderColor})`,
+    color: `hsl(${foregroundColor})`
+  });
+
+  fireEvent.click(solarized);
+
+  expect(document.documentElement.dataset.theme).toBe("solarized");
+  expect(screen.getByRole("button", { name: "Solarized" })).toHaveTextContent("✓");
+});
+
+test("selecting a theme updates the picker and shared panel styles to that same theme", async () => {
+  window.history.pushState({}, "", "/themes");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  const solarized = THEMES.find((theme) => theme.id === "solarized");
+  const footer = await screen.findByText("v0.1.0");
+
+  fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
+
+  expect(document.documentElement.dataset.theme).toBe("solarized");
+  expect(screen.getByRole("button", { name: "Solarized" })).toHaveStyle({
+    backgroundColor: `hsl(${solarized.vars["--primary"]} / 0.1)`,
+    borderColor: `hsl(${solarized.vars["--primary"]})`,
+    color: `hsl(${solarized.vars["--primary"]})`
+  });
+  expect(footer).toHaveStyle({
+    backgroundColor: `hsl(${solarized.vars["--card"]})`,
+    borderTopColor: `hsl(${solarized.vars["--border"]})`,
+    color: `hsl(${solarized.vars["--muted-foreground"]})`
+  });
 });
 
 test("activating a Cortex theme applies the original Cortex token values", async () => {

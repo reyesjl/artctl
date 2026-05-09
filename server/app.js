@@ -15,6 +15,13 @@ function normalizePositiveInteger(value, defaultValue = 1) {
   return Number.isNaN(parsedValue) || parsedValue < 1 ? defaultValue : parsedValue;
 }
 
+function normalizeGalleryState(query = {}) {
+  return {
+    page: normalizePositiveInteger(query.page),
+    shuffle: query.shuffle?.trim() ?? ""
+  };
+}
+
 export function createArtctlApp({
   metClient = createMetApiClient(),
   serveSpa = true,
@@ -75,9 +82,9 @@ export function createArtctlApp({
     }
   });
 
-  app.get("/api/gallery", async (_request, response) => {
+  app.get("/api/gallery", async (request, response) => {
     try {
-      const galleryPage = await metClient.getGalleryPage();
+      const galleryPage = await metClient.getGalleryPage(normalizeGalleryState(request.query));
       response.json(galleryPage);
     } catch (error) {
       response.status(502).json({
