@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { RouteFrame } from "../components/RouteFrame.jsx";
-import { themeColor } from "../themeStyles.js";
 
 function normalizePageParam(value) {
   const parsedPage = Number.parseInt(value ?? "", 10);
@@ -33,46 +32,7 @@ const MEDIUM_OPTIONS = [
 ];
 const SEARCH_PAGE_SIZE = 12;
 
-function getSearchControlStyles() {
-  return {
-    label: {
-      color: themeColor("--muted-foreground")
-    },
-    control: {
-      backgroundColor: themeColor("--secondary"),
-      border: `1px solid ${themeColor("--input")}`,
-      color: themeColor("--foreground")
-    },
-    button: {
-      backgroundColor: themeColor("--secondary"),
-      border: `1px solid ${themeColor("--input")}`,
-      color: themeColor("--foreground")
-    },
-    resultsList: {
-      borderTop: `1px solid ${themeColor("--border")}`
-    },
-    resultRow: {
-      borderBottom: `1px solid ${themeColor("--border")}`
-    },
-    resultLink: {
-      color: themeColor("--primary")
-    },
-    resultFlag: {
-      color: themeColor("--muted-foreground")
-    },
-    paginationButton: {
-      backgroundColor: themeColor("--secondary"),
-      border: `1px solid ${themeColor("--input")}`,
-      color: themeColor("--foreground")
-    },
-    paginationLabel: {
-      color: themeColor("--muted-foreground")
-    }
-  };
-}
-
 export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
-  const styles = getSearchControlStyles();
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q")?.trim() ?? "";
   const departmentId = searchParams.get("departmentId")?.trim() ?? "";
@@ -224,39 +184,32 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }
 
   return (
-    <RouteFrame
-      eyebrow="[search]"
-      title="Search"
-      description="Live Met-backed search will appear here once a query is submitted."
-    >
+    <RouteFrame title="Search">
       <form className="search-form mt-4 grid gap-3" onSubmit={handleSubmit}>
-        <label className="search-label block text-xs" htmlFor="search-query" style={styles.label}>
+        <label className="search-label block text-xs text-muted-foreground" htmlFor="search-query">
           Query
         </label>
         <div className="search-controls flex flex-wrap gap-2">
           <input
             id="search-query"
-            className="search-input min-h-10 flex-[1_1_320px] px-3 py-2"
+            className="search-input min-h-10 flex-[1_1_320px] border border-input bg-secondary px-3 py-2 text-foreground"
             name="q"
             type="search"
             value={draftQuery}
             onChange={(event) => setDraftQuery(event.target.value)}
-            style={styles.control}
           />
           <label
-            className="search-label block text-xs"
+            className="search-label block text-xs text-muted-foreground"
             htmlFor="search-department"
-            style={styles.label}
           >
             Department
           </label>
           <select
             id="search-department"
-            className="search-input min-h-10 flex-[1_1_320px] px-3 py-2"
+            className="search-input min-h-10 flex-[1_1_320px] border border-input bg-secondary px-3 py-2 text-foreground"
             name="departmentId"
             value={draftDepartmentId}
             onChange={(event) => setDraftDepartmentId(event.target.value)}
-            style={styles.control}
           >
             <option value="">All departments</option>
             {departments.map((department) => (
@@ -265,16 +218,15 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
               </option>
             ))}
           </select>
-          <label className="search-label block text-xs" htmlFor="search-medium" style={styles.label}>
+          <label className="search-label block text-xs text-muted-foreground" htmlFor="search-medium">
             Medium
           </label>
           <select
             id="search-medium"
-            className="search-input min-h-10 flex-[1_1_320px] px-3 py-2"
+            className="search-input min-h-10 flex-[1_1_320px] border border-input bg-secondary px-3 py-2 text-foreground"
             name="medium"
             value={draftMedium}
             onChange={(event) => setDraftMedium(event.target.value)}
-            style={styles.control}
           >
             <option value="">All media</option>
             {MEDIUM_OPTIONS.map((group) => (
@@ -288,9 +240,8 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             ))}
           </select>
           <button
-            className="search-button min-h-10 rounded-sm px-3"
+            className="search-button min-h-10 rounded-sm border border-input bg-secondary px-3 text-foreground"
             type="submit"
-            style={styles.button}
           >
             [search]
           </button>
@@ -301,25 +252,21 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       {query && status === "error" ? <p>{error}</p> : null}
       {query && status === "success" ? (
         <>
-          <ul className="search-results mt-4 list-none p-0" style={styles.resultsList}>
+          <ul className="search-results mt-4 list-none border-t border-border p-0">
             {results.map((result) => (
-              <li key={result.objectId} className="search-result py-3" style={styles.resultRow}>
-                <Link
-                  className="font-medium"
-                  to={`/works/${result.objectId}`}
-                  style={styles.resultLink}
-                >
+              <li key={result.objectId} className="search-result border-b border-border py-3">
+                <Link className="font-medium text-primary" to={`/works/${result.objectId}`}>
                   {result.title}
                 </Link>
                 {!result.isPublicDomain || !result.hasImage ? (
                   <p className="search-result-flags mt-2 flex flex-wrap gap-2">
                     {!result.isPublicDomain ? (
-                      <span className="search-result-flag text-xs" style={styles.resultFlag}>
+                      <span className="search-result-flag text-xs text-muted-foreground">
                         Rights Restricted
                       </span>
                     ) : null}
                     {!result.hasImage ? (
-                      <span className="search-result-flag text-xs" style={styles.resultFlag}>
+                      <span className="search-result-flag text-xs text-muted-foreground">
                         No Image Available
                       </span>
                     ) : null}
@@ -332,23 +279,19 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             <div className="search-pagination mt-4 flex flex-wrap items-center gap-3">
               {page > 1 ? (
                 <button
-                  className="min-h-10 rounded-sm px-3"
+                  className="min-h-10 rounded-sm border border-input bg-secondary px-3 text-foreground"
                   type="button"
                   onClick={() => handlePageChange(page - 1)}
-                  style={styles.paginationButton}
                 >
                   Prev page
                 </button>
               ) : null}
-              <span className="text-xs" style={styles.paginationLabel}>
-                Page {page}
-              </span>
+              <span className="text-xs text-muted-foreground">Page {page}</span>
               {results.length === SEARCH_PAGE_SIZE ? (
                 <button
-                  className="min-h-10 rounded-sm px-3"
+                  className="min-h-10 rounded-sm border border-input bg-secondary px-3 text-foreground"
                   type="button"
                   onClick={() => handlePageChange(page + 1)}
-                  style={styles.paginationButton}
                 >
                   Next page
                 </button>

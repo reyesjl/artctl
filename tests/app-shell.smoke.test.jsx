@@ -90,7 +90,8 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(screen.queryByText("[ARTCTL]")).not.toBeInTheDocument();
   expect(screen.queryByText("Met collection terminal viewer")).not.toBeInTheDocument();
-  expect(document.documentElement.dataset.theme).toBe("dark-green");
+  expect(window.localStorage.getItem("artctl-theme")).toBe("dark-green");
+  expect(document.documentElement.style.getPropertyValue("--background")).toBe("220 20% 4%");
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
@@ -116,7 +117,7 @@ test.each([
   expect(screen.getByRole("link", { name: "[themes]" })).toBeInTheDocument();
 });
 
-test("search route keeps its content inside a themed route frame within the shared shell", async () => {
+test("search route keeps its content on the shared shell background", async () => {
   window.history.pushState({}, "", "/search");
 
   render(<App fetchImpl={fetchImpl} />);
@@ -125,16 +126,9 @@ test("search route keeps its content inside a themed route frame within the shar
   const routeFrame = heading.closest("section");
 
   expect(routeFrame).not.toBeNull();
-  expect(routeFrame).toContainElement(
-    screen.getByText("Live Met-backed search will appear here once a query is submitted.")
-  );
   expect(routeFrame).toContainElement(screen.getByLabelText("Query"));
-  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
-  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
-  expect(routeFrame).toHaveStyle({
-    backgroundColor: `hsl(${cardColor})`,
-    border: `1px solid hsl(${borderColor})`
-  });
+  expect(routeFrame).not.toHaveClass("bg-card");
+  expect(routeFrame).not.toHaveClass("border-border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByText("v0.1.0")).toBeInTheDocument();
 });
@@ -147,8 +141,9 @@ test("current route marks only the active nav link", async () => {
   const galleryLink = await screen.findByRole("link", { name: "[gallery]" });
   const searchLink = screen.getByRole("link", { name: "[search]" });
 
-  expect(searchLink).toHaveClass("active");
-  expect(galleryLink).not.toHaveClass("active");
+  expect(searchLink).toHaveClass("bg-primary/10");
+  expect(searchLink).toHaveClass("text-primary");
+  expect(galleryLink).toHaveClass("text-muted-foreground");
 });
 
 test("homepage renders highlighted Met works from Express as gallery links", async () => {
@@ -176,7 +171,7 @@ test("homepage renders highlighted Met works from Express as gallery links", asy
 
   render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
 
-  expect(await screen.findByText(/The Met's highlighted works/i)).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
   expect(await screen.findByRole("link", { name: /The Great Wave off Kanagawa/i })).toHaveAttribute(
     "href",
     "/works/436121"
@@ -186,131 +181,8 @@ test("homepage renders highlighted Met works from Express as gallery links", asy
     "/works/436524"
   );
   expect(requests).toContain("/api/gallery");
-});
-
-test("homepage appends the next gallery batch in place when Load More is selected", async () => {
-  const requests = [];
-  const metClient = {
-    async getGalleryPage({ page = 1 } = {}) {
-      const startId = page === 1 ? 1 : 25;
-      const endId = page === 1 ? 24 : 48;
-
-      return {
-        hasMore: page < 2,
-        results: Array.from({ length: endId - startId + 1 }, (_, index) => {
-          const objectId = startId + index;
-
-          return {
-            objectId,
-            title: `Work ${objectId}`,
-            artist: `Artist ${objectId}`,
-            imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
-          };
-        })
-      };
-    }
-  };
-
-  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
-
-  expect((await screen.findByText("Work 1")).closest("a")).toHaveAttribute("href", "/works/1");
-  expect(screen.queryByText("Work 25")).not.toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole("button", { name: "Load More" }));
-
-  expect((await screen.findByText("Work 25")).closest("a")).toHaveAttribute("href", "/works/25");
-  expect(screen.getByText("Work 48").closest("a")).toHaveAttribute("href", "/works/48");
-  expect(window.location.search).toBe("?page=2");
-  expect(requests).toContain("/api/gallery?page=2");
-});
-
-test("homepage shuffle starts a seeded gallery order from the top", async () => {
-  const requests = [];
-  const metClient = {
-    async getGalleryPage({ shuffle = "" } = {}) {
-      const objectIds = shuffle
-        ? Array.from({ length: 24 }, (_, index) => 48 - index)
-        : Array.from({ length: 24 }, (_, index) => index + 1);
-
-      return {
-        hasMore: true,
-        results: objectIds.map((objectId) => ({
-          objectId,
-          title: `Work ${objectId}`,
-          artist: `Artist ${objectId}`,
-          imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
-        }))
-      };
-    }
-  };
-
-  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
-
-  expect(await screen.findByText("Work 1")).toBeInTheDocument();
-
-  fireEvent.click(screen.getByRole("button", { name: "Shuffle" }));
-
-  expect(await screen.findByText("Work 48")).toBeInTheDocument();
-  expect(screen.queryByText("Work 1")).not.toBeInTheDocument();
-  expect(window.location.search).toMatch(/^\?shuffle=/);
-  expect(requests.some((request) => request.startsWith("/api/gallery?shuffle="))).toBe(true);
-});
-
-test("homepage restores shuffled gallery extent from the URL and after browser back", async () => {
-  const requests = [];
-  const metClient = {
-    async getGalleryPage({ page = 1, shuffle = "" } = {}) {
-      const startId = page === 1 ? 41 : 65;
-      const endId = page === 1 ? 64 : 88;
-
-      return {
-        hasMore: page < 2,
-        results: Array.from({ length: endId - startId + 1 }, (_, index) => {
-          const objectId = startId + index;
-
-          return {
-            objectId,
-            title: shuffle ? `Shuffle Work ${objectId}` : `Work ${objectId}`,
-            artist: `Artist ${objectId}`,
-            imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
-          };
-        })
-      };
-    },
-
-    async getWork(objectId) {
-      return {
-        objectId: Number(objectId),
-        title: `Shuffle Work ${objectId}`,
-        artist: `Artist ${objectId}`,
-        date: "1900",
-        context: "Object context unavailable",
-        imageUrl: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`,
-        metUrl: `https://www.metmuseum.org/art/collection/search/${objectId}`
-      };
-    }
-  };
-
-  window.history.pushState({}, "", "/?page=2&shuffle=seeded-order");
-  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
-
-  expect(await screen.findByText("Shuffle Work 41")).toBeInTheDocument();
-  expect(await screen.findByText("Shuffle Work 88")).toBeInTheDocument();
-  expect(requests).toContain("/api/gallery?shuffle=seeded-order");
-  expect(requests).toContain("/api/gallery?page=2&shuffle=seeded-order");
-
-  fireEvent.click(screen.getByText("Shuffle Work 41").closest("a"));
-
-  expect(await screen.findByRole("heading", { name: "Shuffle Work 41" })).toBeInTheDocument();
-
-  window.history.back();
-  window.dispatchEvent(new PopStateEvent("popstate"));
-
-  expect(await screen.findByText("Shuffle Work 41")).toBeInTheDocument();
-  await waitFor(() => {
-    expect(screen.getByText("Shuffle Work 88")).toBeInTheDocument();
-    expect(window.location.search).toBe("?page=2&shuffle=seeded-order");
-  });
+  expect(screen.queryByRole("button", { name: "Shuffle" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Load More" })).not.toBeInTheDocument();
 });
 
 test("homepage renders gallery cards as themed surfaces while preserving links and copy", async () => {
@@ -335,23 +207,13 @@ test("homepage renders gallery cards as themed surfaces while preserving links a
   const card = cardLink.closest("li");
   const title = screen.getByText("Sunflowers");
   const meta = screen.getByText("Vincent van Gogh");
-  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
-  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
-  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
-  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
 
   expect(card).not.toBeNull();
-  expect(card).toHaveStyle({
-    backgroundColor: `hsl(${cardColor})`,
-    border: `1px solid hsl(${borderColor})`
-  });
+  expect(card).toHaveClass("bg-card");
+  expect(card).toHaveClass("border-border");
   expect(cardLink).toHaveAttribute("href", "/works/436524");
-  expect(title).toHaveStyle({
-    color: `hsl(${foregroundColor})`
-  });
-  expect(meta).toHaveStyle({
-    color: `hsl(${mutedColor})`
-  });
+  expect(title).toHaveClass("text-foreground");
+  expect(meta).toHaveClass("text-muted-foreground");
 });
 
 test("homepage renders the gallery list as a grid while preserving multiple cards", async () => {
@@ -383,12 +245,10 @@ test("homepage renders the gallery list as a grid while preserving multiple card
   const grid = firstLink.closest("ul");
 
   expect(grid).not.toBeNull();
-  expect(grid).toHaveStyle({
-    display: "grid",
-    gap: "16px",
-    padding: "0px",
-    listStyle: "none"
-  });
+  expect(grid).toHaveClass("grid");
+  expect(grid).toHaveClass("gap-4");
+  expect(grid).toHaveClass("p-0");
+  expect(grid).toHaveClass("list-none");
   expect(firstLink).toHaveAttribute("href", "/works/436121");
   expect(secondLink).toHaveAttribute("href", "/works/436524");
 });
@@ -422,23 +282,16 @@ test("homepage preserves gallery image and placeholder treatment inside themed m
   const placeholder = screen.getByText((_, element) =>
     Boolean(element?.classList.contains("gallery-card-image-placeholder"))
   );
-  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
-  const mutedColor = document.documentElement.style.getPropertyValue("--muted").trim();
 
   expect(imageFrame).not.toBeNull();
-  expect(imageFrame).toHaveStyle({
-    backgroundColor: `hsl(${secondaryColor})`
-  });
+  expect(imageFrame).toHaveClass("bg-secondary");
   expect(image).toHaveAttribute(
     "src",
     "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
   );
-  expect(image).toHaveStyle({
-    width: "100%"
-  });
-  expect(placeholder).toHaveStyle({
-    backgroundColor: `hsl(${mutedColor})`
-  });
+  expect(image).toHaveClass("block");
+  expect(image).toHaveClass("w-full");
+  expect(placeholder).toHaveClass("bg-muted");
 });
 
 test("homepage shows a friendly message when Express cannot load the Met gallery", async () => {
@@ -524,28 +377,17 @@ test("search route renders themed controls while preserving current submission b
   const departmentSelect = await screen.findByLabelText("Department");
   const mediumSelect = screen.getByLabelText("Medium");
   const searchButton = screen.getByRole("button", { name: "[search]" });
-  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
-  const inputColor = document.documentElement.style.getPropertyValue("--input").trim();
-  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
 
-  expect(queryInput).toHaveStyle({
-    backgroundColor: `hsl(${secondaryColor})`,
-    border: `1px solid hsl(${inputColor})`,
-    color: `hsl(${foregroundColor})`
-  });
-  expect(departmentSelect).toHaveStyle({
-    backgroundColor: `hsl(${secondaryColor})`,
-    border: `1px solid hsl(${inputColor})`
-  });
-  expect(mediumSelect).toHaveStyle({
-    backgroundColor: `hsl(${secondaryColor})`,
-    border: `1px solid hsl(${inputColor})`
-  });
-  expect(searchButton).toHaveStyle({
-    backgroundColor: `hsl(${secondaryColor})`,
-    border: `1px solid hsl(${inputColor})`,
-    color: `hsl(${foregroundColor})`
-  });
+  expect(queryInput).toHaveClass("bg-secondary");
+  expect(queryInput).toHaveClass("border-input");
+  expect(queryInput).toHaveClass("text-foreground");
+  expect(departmentSelect).toHaveClass("bg-secondary");
+  expect(departmentSelect).toHaveClass("border-input");
+  expect(mediumSelect).toHaveClass("bg-secondary");
+  expect(mediumSelect).toHaveClass("border-input");
+  expect(searchButton).toHaveClass("bg-secondary");
+  expect(searchButton).toHaveClass("border-input");
+  expect(searchButton).toHaveClass("text-foreground");
 
   fireEvent.change(queryInput, {
     target: { value: "landscape" }
@@ -714,19 +556,11 @@ test("search pagination renders as a themed control surface while preserving pag
 
   const nextButton = await screen.findByRole("button", { name: "Next page" });
   const pageLabel = screen.getByText("Page 1");
-  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
-  const inputColor = document.documentElement.style.getPropertyValue("--input").trim();
-  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
-  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
 
-  expect(nextButton).toHaveStyle({
-    backgroundColor: `hsl(${secondaryColor})`,
-    border: `1px solid hsl(${inputColor})`,
-    color: `hsl(${foregroundColor})`
-  });
-  expect(pageLabel).toHaveStyle({
-    color: `hsl(${mutedColor})`
-  });
+  expect(nextButton).toHaveClass("bg-secondary");
+  expect(nextButton).toHaveClass("border-input");
+  expect(nextButton).toHaveClass("text-foreground");
+  expect(pageLabel).toHaveClass("text-muted-foreground");
 
   fireEvent.click(nextButton);
 
@@ -896,28 +730,17 @@ test("search results render as a themed list while preserving result-link behavi
   const resultRow = resultLink.closest("li");
   const restrictedFlag = screen.getByText("Rights Restricted");
   const noImageFlag = screen.getByText("No Image Available");
-  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
-  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
-  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
 
   expect(resultsList).not.toBeNull();
   expect(resultRow).not.toBeNull();
-  expect(resultsList).toHaveStyle({
-    borderTop: `1px solid hsl(${borderColor})`
-  });
-  expect(resultRow).toHaveStyle({
-    borderBottom: `1px solid hsl(${borderColor})`
-  });
+  expect(resultsList).toHaveClass("border-t");
+  expect(resultsList).toHaveClass("border-border");
+  expect(resultRow).toHaveClass("border-b");
+  expect(resultRow).toHaveClass("border-border");
   expect(resultLink).toHaveAttribute("href", "/works/486055");
-  expect(resultLink).toHaveStyle({
-    color: `hsl(${primaryColor})`
-  });
-  expect(restrictedFlag).toHaveStyle({
-    color: `hsl(${mutedColor})`
-  });
-  expect(noImageFlag).toHaveStyle({
-    color: `hsl(${mutedColor})`
-  });
+  expect(resultLink).toHaveClass("text-primary");
+  expect(restrictedFlag).toHaveClass("text-muted-foreground");
+  expect(noImageFlag).toHaveClass("text-muted-foreground");
 });
 
 test("search route shows an error message when Express cannot load Met results", async () => {
@@ -1015,24 +838,14 @@ test("work viewer renders a themed layout and metadata panel while preserving wo
   const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
   const viewer = image.closest("div");
   const metadata = screen.getByLabelText("Work metadata");
-  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
-  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
-  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
 
   expect(viewer).not.toBeNull();
-  expect(viewer).toHaveStyle({
-    display: "grid",
-    gap: "16px"
-  });
-  expect(metadata).toHaveStyle({
-    borderTop: `1px solid hsl(${borderColor})`
-  });
-  expect(screen.getByText("Artist")).toHaveStyle({
-    color: `hsl(${mutedColor})`
-  });
-  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveStyle({
-    color: `hsl(${primaryColor})`
-  });
+  expect(viewer).toHaveClass("grid");
+  expect(viewer).toHaveClass("gap-4");
+  expect(metadata).toHaveClass("border-t");
+  expect(metadata).toHaveClass("border-border");
+  expect(screen.getByText("Artist")).toHaveClass("text-muted-foreground");
+  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveClass("text-primary");
   expect(screen.getByText("Japanese")).toBeInTheDocument();
   expect(screen.getByText("ca. 1830-32")).toBeInTheDocument();
 });
@@ -1057,18 +870,12 @@ test("work viewer preserves image framing inside a themed media surface", async 
 
   const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
   const frame = image.closest("figure");
-  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
-  const secondaryColor = document.documentElement.style.getPropertyValue("--secondary").trim();
 
   expect(frame).not.toBeNull();
-  expect(frame).toHaveStyle({
-    border: `1px solid hsl(${borderColor})`,
-    backgroundColor: `hsl(${secondaryColor})`
-  });
-  expect(image).toHaveStyle({
-    display: "block",
-    width: "100%"
-  });
+  expect(frame).toHaveClass("border-border");
+  expect(frame).toHaveClass("bg-secondary");
+  expect(image).toHaveClass("block");
+  expect(image).toHaveClass("w-full");
 });
 
 test("work viewer shows a themed unavailable-image state while preserving metadata", async () => {
@@ -1090,12 +897,9 @@ test("work viewer shows a themed unavailable-image state while preserving metada
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
   const unavailable = await screen.findByText("Image unavailable through the Met API.");
-  const mutedColor = document.documentElement.style.getPropertyValue("--muted-foreground").trim();
 
-  expect(unavailable).toHaveStyle({
-    color: `hsl(${mutedColor})`,
-    textAlign: "center"
-  });
+  expect(unavailable).toHaveClass("text-muted-foreground");
+  expect(unavailable).toHaveClass("text-center");
   expect(screen.queryByRole("img", { name: "Galisteo Creek" })).not.toBeInTheDocument();
   expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
 });
@@ -1128,18 +932,15 @@ test("work viewer shows metadata when the Met API has no image for the object", 
   );
 });
 
-test("work viewer shows a not found message when Express cannot load the object", async () => {
+test("work viewer renders an empty state when Express cannot load the object", async () => {
   const metClient = {
     async getWork() {
       return null;
     }
   };
-
   window.history.pushState({}, "", "/works/999999");
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
-
   expect(await screen.findByRole("heading", { name: "Work 999999" })).toBeInTheDocument();
-  expect(await screen.findByText("Work not found.")).toBeInTheDocument();
   expect(screen.queryByRole("img")).not.toBeInTheDocument();
 });
 
@@ -1174,7 +975,7 @@ test("help route presents the current ARTCTL product copy", async () => {
   ).toBeInTheDocument();
 });
 
-test("help route renders a themed reading surface while preserving the manual copy", async () => {
+test("help route renders the manual copy on the shared background", async () => {
   window.history.pushState({}, "", "/help");
 
   render(<App fetchImpl={fetchImpl} />);
@@ -1183,17 +984,10 @@ test("help route renders a themed reading surface while preserving the manual co
   const manual = screen.getByText("ARTCTL", { selector: ".help-page-manual" });
   const helpPage = manual.closest("article");
   const galleryTitle = screen.getByText("── Gallery ──");
-  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
-  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
-  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
 
-  expect(helpPage).toHaveStyle({
-    backgroundColor: `hsl(${cardColor})`,
-    borderColor: `hsl(${borderColor})`
-  });
-  expect(galleryTitle).toHaveStyle({
-    color: `hsl(${primaryColor})`
-  });
+  expect(helpPage).not.toHaveClass("bg-card");
+  expect(helpPage).not.toHaveClass("border-border");
+  expect(galleryTitle).toHaveClass("text-primary");
   expect(
     screen.getByText(/your selected theme persists across gallery, search, help, and artwork views/i)
   ).toBeInTheDocument();
@@ -1221,13 +1015,14 @@ test("themes route matches the Cortex-style theme picker structure and active st
   expect(screen.getByRole("button", { name: "CRT Amber" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Solarized" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Sepia" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Dark Green" })).toHaveTextContent("✓");
+  expect(screen.getByRole("button", { name: "Dark Green" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getAllByText("✓")).toHaveLength(1);
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 
-  expect(document.documentElement.dataset.theme).toBe("solarized");
-  expect(screen.getByRole("button", { name: "Solarized" })).toHaveTextContent("✓");
+  expect(window.localStorage.getItem("artctl-theme")).toBe("solarized");
+  expect(document.documentElement.style.getPropertyValue("--primary")).toBe("68 100% 30%");
+  expect(screen.getByRole("button", { name: "Solarized" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getAllByText("✓")).toHaveLength(1);
 });
 
@@ -1238,26 +1033,18 @@ test("themes route renders a themed picker surface while preserving theme select
 
   const darkGreen = await screen.findByRole("button", { name: "Dark Green" });
   const solarized = screen.getByRole("button", { name: "Solarized" });
-  const cardColor = document.documentElement.style.getPropertyValue("--card").trim();
-  const borderColor = document.documentElement.style.getPropertyValue("--border").trim();
-  const foregroundColor = document.documentElement.style.getPropertyValue("--foreground").trim();
-  const primaryColor = document.documentElement.style.getPropertyValue("--primary").trim();
 
-  expect(darkGreen).toHaveStyle({
-    backgroundColor: `hsl(${primaryColor} / 0.1)`,
-    borderColor: `hsl(${primaryColor})`,
-    color: `hsl(${primaryColor})`
-  });
-  expect(solarized).toHaveStyle({
-    backgroundColor: `hsl(${cardColor})`,
-    borderColor: `hsl(${borderColor})`,
-    color: `hsl(${foregroundColor})`
-  });
+  expect(darkGreen).toHaveClass("bg-primary/10");
+  expect(darkGreen).toHaveClass("border-primary");
+  expect(darkGreen).toHaveClass("text-primary");
+  expect(solarized).toHaveClass("bg-card");
+  expect(solarized).toHaveClass("border-border");
+  expect(solarized).toHaveClass("text-foreground");
 
   fireEvent.click(solarized);
 
-  expect(document.documentElement.dataset.theme).toBe("solarized");
-  expect(screen.getByRole("button", { name: "Solarized" })).toHaveTextContent("✓");
+  expect(window.localStorage.getItem("artctl-theme")).toBe("solarized");
+  expect(screen.getByRole("button", { name: "Solarized" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("selecting a theme updates the picker and shared panel styles to that same theme", async () => {
@@ -1270,17 +1057,11 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 
-  expect(document.documentElement.dataset.theme).toBe("solarized");
-  expect(screen.getByRole("button", { name: "Solarized" })).toHaveStyle({
-    backgroundColor: `hsl(${solarized.vars["--primary"]} / 0.1)`,
-    borderColor: `hsl(${solarized.vars["--primary"]})`,
-    color: `hsl(${solarized.vars["--primary"]})`
-  });
-  expect(footer).toHaveStyle({
-    backgroundColor: `hsl(${solarized.vars["--card"]})`,
-    borderTopColor: `hsl(${solarized.vars["--border"]})`,
-    color: `hsl(${solarized.vars["--muted-foreground"]})`
-  });
+  expect(window.localStorage.getItem("artctl-theme")).toBe("solarized");
+  expect(screen.getByRole("button", { name: "Solarized" })).toHaveAttribute("aria-pressed", "true");
+  expect(footer).toHaveClass("bg-card");
+  expect(footer).toHaveClass("border-border");
+  expect(footer).toHaveClass("text-muted-foreground");
 });
 
 test("activating a Cortex theme applies the original Cortex token values", async () => {
@@ -1312,7 +1093,8 @@ test("app startup restores the previously chosen theme from browser storage", as
   render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
-  expect(document.documentElement.dataset.theme).toBe("crt-amber");
+  expect(document.documentElement.style.getPropertyValue("--primary")).toBe("40 100% 50%");
+  expect(window.localStorage.getItem("artctl-theme")).toBe("crt-amber");
 });
 
 test("the active theme remains applied when navigating to another route", async () => {
@@ -1324,5 +1106,6 @@ test("the active theme remains applied when navigating to another route", async 
   fireEvent.click(screen.getByRole("link", { name: "[help]" }));
 
   expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
-  expect(document.documentElement.dataset.theme).toBe("windows-xp");
+  expect(document.documentElement.style.getPropertyValue("--primary")).toBe("217 100% 45%");
+  expect(window.localStorage.getItem("artctl-theme")).toBe("windows-xp");
 });

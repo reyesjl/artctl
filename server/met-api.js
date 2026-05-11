@@ -4,7 +4,6 @@ const defaultRequestTimeoutMs = 8 * 1000;
 const defaultMaxRetries = 1;
 const defaultChallengeCooldownMs = 10 * 1000;
 const searchPageSize = 12;
-const galleryPageSize = 24;
 const galleryBatchSize = 24;
 const searchChallengeErrorMessage = "Met API returned a non-JSON search response.";
 const workChallengeErrorMessage = "Met API returned a non-JSON work response.";
@@ -130,13 +129,6 @@ function normalizeSearchState(input) {
   };
 }
 
-function normalizeGalleryState(input) {
-  return {
-    page: normalizePositiveInteger(input?.page),
-    shuffle: input?.shuffle?.trim() ?? ""
-  };
-}
-
 function buildSearchCacheKey(searchState) {
   return JSON.stringify([
     searchState.query,
@@ -144,36 +136,6 @@ function buildSearchCacheKey(searchState) {
     searchState.medium,
     searchState.page
   ]);
-}
-
-function buildGalleryCacheKey(galleryState) {
-  return JSON.stringify([galleryState.page, galleryState.shuffle]);
-}
-
-function hashString(input) {
-  let hash = 2166136261;
-
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return hash >>> 0;
-}
-
-function buildGalleryOrder(objectIds, shuffleSeed) {
-  const sortedObjectIds = [...objectIds].sort((left, right) => left - right);
-
-  if (!shuffleSeed) {
-    return sortedObjectIds;
-  }
-
-  return sortedObjectIds.sort((left, right) => {
-    const leftRank = hashString(`${shuffleSeed}:${left}`);
-    const rightRank = hashString(`${shuffleSeed}:${right}`);
-
-    return leftRank - rightRank || left - right;
-  });
 }
 
 const curatedMediumMatchers = {
@@ -517,12 +479,9 @@ export function createMetApiClient({
       return result;
     },
 
-    async getGalleryPage(input) {
-      const galleryState = normalizeGalleryState(input);
-      const cacheKey = buildGalleryCacheKey(galleryState);
+    async getGalleryPage() {
+      const cacheKey = "gallery";
       const cachedResult = getCachedValue(galleryCache, cacheKey);
-      const lastResultIndex = galleryState.page * galleryPageSize;
-      const firstResultIndex = lastResultIndex - galleryPageSize;
 
       if (cachedResult) {
         return cachedResult;
@@ -537,12 +496,12 @@ export function createMetApiClient({
         const gallerySearchPayload = await readJson(gallerySearchUrl, {
           errorMessage: "Met API returned a non-JSON gallery response."
         });
-        const objectIds = buildGalleryOrder(gallerySearchPayload.objectIDs ?? [], galleryState.shuffle);
+        const objectIds = [...(gallerySearchPayload.objectIDs ?? [])].sort((left, right) => left - right);
         const results = [];
 
         for (
           let index = 0;
-          index < objectIds.length && results.length <= lastResultIndex;
+          index < objectIds.length && results.length < galleryBatchSize;
           index += galleryBatchSize
         ) {
           const objectPayloads = await Promise.all(
@@ -564,12 +523,7 @@ export function createMetApiClient({
           );
         }
 
-        const result = {
-          page: galleryState.page,
-          shuffle: galleryState.shuffle,
-          hasMore: results.length > lastResultIndex,
-          results: results.slice(firstResultIndex, lastResultIndex)
-        };
+        const result = { results: results.slice(0, galleryBatchSize) };
         setCachedValue(galleryCache, cacheKey, result);
 
         return result;

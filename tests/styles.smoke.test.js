@@ -7,4 +7,5 @@ test("global stylesheet no longer ships the unused manual-section rules", () => 
   const styles = readFileSync(stylesPath, "utf8");
 
   expect(styles).not.toContain(".manual-section");
+  expect(styles).toContain("@apply bg-background text-foreground;");
 });
