@@ -2,9 +2,20 @@ const metApiBaseUrl = "https://collectionapi.metmuseum.org/public/collection/v1"
 const defaultCacheTtlMs = 5 * 60 * 1000;
 const defaultRequestTimeoutMs = 8 * 1000;
 const defaultMaxRetries = 1;
+const defaultChallengeCooldownMs = 10 * 1000;
 const searchPageSize = 12;
 const galleryPageSize = 24;
 const galleryBatchSize = 24;
+const searchChallengeErrorMessage = "Met API returned a non-JSON search response.";
+const workChallengeErrorMessage = "Met API returned a non-JSON work response.";
+
+function createMetCooldownMetadata(retryAfterMs) {
+  return {
+    backoff: true,
+    scope: "met",
+    retryAfterMs
+  };
+}
 
 class MetApiError extends Error {
   constructor(message) {
@@ -195,12 +206,17 @@ export function createMetApiClient({
   fetchImpl = fetch,
   cacheTtlMs = defaultCacheTtlMs,
   requestTimeoutMs = defaultRequestTimeoutMs,
-  maxRetries = defaultMaxRetries
+  maxRetries = defaultMaxRetries,
+  challengeCooldownMs = defaultChallengeCooldownMs,
+  searchChallengeCooldownMs = challengeCooldownMs,
+  logger = console
 } = {}) {
   const searchCache = new Map();
   const galleryCache = new Map();
   const departmentCache = new Map();
   const cookieJar = new Map();
+  const cooldownDurationMs = searchChallengeCooldownMs;
+  let metCooldownUntil = 0;
 
   function getCachedValue(cache, key) {
     const entry = cache.get(key);
@@ -289,7 +305,51 @@ export function createMetApiClient({
     }
   }
 
-  async function fetchMet(resource) {
+  function getCooldownStatus() {
+    const retryAfterMs = metCooldownUntil - Date.now();
+
+    if (retryAfterMs <= 0) {
+      return null;
+    }
+
+    return createMetCooldownMetadata(retryAfterMs);
+  }
+
+  function clearCooldownIfExpired() {
+    if (metCooldownUntil === 0 || metCooldownUntil > Date.now()) {
+      return;
+    }
+
+    metCooldownUntil = 0;
+    logger.info?.("[met-api] cooldown cleared", { scope: "met" });
+  }
+
+  function startCooldown(resource) {
+    if (cooldownDurationMs <= 0) {
+      return;
+    }
+
+    metCooldownUntil = Date.now() + cooldownDurationMs;
+    logger.info?.("[met-api] cooldown started", {
+      scope: "met",
+      retryAfterMs: cooldownDurationMs,
+      resource: String(resource)
+    });
+  }
+
+  async function fetchMet(resource, { errorMessage }) {
+    clearCooldownIfExpired();
+
+    const cooldownStatus = getCooldownStatus();
+
+    if (cooldownStatus) {
+      logger.info?.("[met-api] cooldown active", {
+        ...cooldownStatus,
+        resource: String(resource)
+      });
+      throw new MetApiError(errorMessage);
+    }
+
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
       try {
         const cookieHeader = getCookieHeader();
@@ -311,6 +371,10 @@ export function createMetApiClient({
           rememberCookies(response);
         }
 
+        if (response.status === 403 && !isJsonResponse(response)) {
+          startCooldown(resource);
+        }
+
         if (isRetryableResponse(response) && attempt < maxRetries) {
           await sleep(150 * (attempt + 1));
           continue;
@@ -330,7 +394,7 @@ export function createMetApiClient({
   }
 
   async function readJson(resource, { errorMessage }) {
-    const response = await fetchMet(resource);
+    const response = await fetchMet(resource, { errorMessage });
 
     if (!response.ok || !isJsonResponse(response)) {
       throw new MetApiError(errorMessage);
@@ -343,9 +407,15 @@ export function createMetApiClient({
     let objectResponse;
 
     try {
-      objectResponse = await fetchMet(`${metApiBaseUrl}/objects/${objectId}`);
+      objectResponse = await fetchMet(`${metApiBaseUrl}/objects/${objectId}`, {
+        errorMessage: workChallengeErrorMessage
+      });
     } catch (error) {
-      if (optional) {
+      if (error instanceof MetApiError && error.message === workChallengeErrorMessage) {
+        throw error;
+      }
+
+      if (optional && !getCooldownStatus()) {
         return null;
       }
 
@@ -353,11 +423,11 @@ export function createMetApiClient({
     }
 
     if (!objectResponse.ok || !isJsonResponse(objectResponse)) {
-      if (optional) {
+      if (optional && !getCooldownStatus()) {
         return null;
       }
 
-      throw new MetApiError("Met API returned a non-JSON work response.");
+      throw new MetApiError(workChallengeErrorMessage);
     }
 
     return objectResponse.json();
@@ -383,7 +453,7 @@ export function createMetApiClient({
       }
 
       const searchPayload = await readJson(searchUrl, {
-        errorMessage: "Met API returned a non-JSON search response."
+        errorMessage: searchChallengeErrorMessage
       });
       const objectIds = searchPayload.objectIDs ?? [];
       const firstResultIndex = (searchState.page - 1) * searchPageSize;
@@ -522,6 +592,11 @@ export function createMetApiClient({
       }
 
       return normalizeWorkDetail(object);
+    },
+
+    getCooldownStatus() {
+      clearCooldownIfExpired();
+      return getCooldownStatus();
     }
   };
 }

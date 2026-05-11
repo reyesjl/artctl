@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import httpMocks from "node-mocks-http";
 import { createArtctlApp } from "../server/app.js";
 import { createMetApiClient } from "../server/met-api.js";
@@ -296,9 +296,142 @@ describe("search API", () => {
     const response = await makeRequest("/api/search?q=sunflowers", searchApp);
 
     expect(response.statusCode).toBe(502);
-    expect(JSON.parse(response._getData())).toEqual({
-      error: "Met API returned a non-JSON search response."
+    const payload = JSON.parse(response._getData());
+    expect(payload).toMatchObject({
+      error: "Met API returned a non-JSON search response.",
+      backoff: true,
+      scope: "met"
     });
+    expect(payload.retryAfterMs).toBeGreaterThan(0);
+  });
+
+  test("GET /api/search stops re-hitting the challenged Met search endpoint during recovery", async () => {
+    const searchRequests = [];
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.includes("/search?")) {
+          searchRequests.push(url);
+          return createTextResponse("<html>blocked</html>", {
+            status: 403,
+            contentType: "text/html"
+          });
+        }
+
+        throw new Error(`Unexpected Met API request: ${url}`);
+      }
+    });
+    const searchApp = createArtctlApp({ metClient });
+
+    const firstResponse = await makeRequest("/api/search?q=sunflowers", searchApp);
+    const secondResponse = await makeRequest("/api/search?q=iris", searchApp);
+    const thirdResponse = await makeRequest("/api/search?q=monet", searchApp);
+
+    expect(firstResponse.statusCode).toBe(502);
+    expect(secondResponse.statusCode).toBe(502);
+    expect(thirdResponse.statusCode).toBe(502);
+    expect(JSON.parse(secondResponse._getData())).toMatchObject({
+      error: "Met API returned a non-JSON search response.",
+      backoff: true,
+      scope: "met"
+    });
+    expect(JSON.parse(thirdResponse._getData())).toMatchObject({
+      error: "Met API returned a non-JSON search response.",
+      backoff: true,
+      scope: "met"
+    });
+    expect(searchRequests).toHaveLength(1);
+  });
+
+  test("GET /api/search keeps a deterministic error during recovery and retries after cooldown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-09T00:00:00.000Z"));
+
+    try {
+      const searchRequests = [];
+      const metClient = createMetApiClient({
+        searchChallengeCooldownMs: 1000,
+        async fetchImpl(resource) {
+          const url = String(resource);
+
+          if (url.includes("/search?")) {
+            searchRequests.push(url);
+
+            if (searchRequests.length === 1) {
+              return createTextResponse("<html>blocked</html>", {
+                status: 403,
+                contentType: "text/html"
+              });
+            }
+
+            return createJsonResponse({
+              total: 1,
+              objectIDs: [436524]
+            });
+          }
+
+          if (url.endsWith("/objects/436524")) {
+            return createJsonResponse({
+              objectID: 436524,
+              title: "Sunflowers",
+              artistDisplayName: "Vincent van Gogh",
+              culture: "",
+              objectDate: "1887",
+              primaryImage: "",
+              primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/DP130155.jpg"
+            });
+          }
+
+          throw new Error(`Unexpected Met API request: ${url}`);
+        }
+      });
+      const searchApp = createArtctlApp({ metClient });
+
+      const firstResponse = await makeRequest("/api/search?q=sunflowers", searchApp);
+
+      vi.setSystemTime(new Date("2026-05-09T00:00:00.500Z"));
+      const cooldownResponse = await makeRequest("/api/search?q=iris", searchApp);
+
+      vi.setSystemTime(new Date("2026-05-09T00:00:01.001Z"));
+      const recoveredResponse = await makeRequest("/api/search?q=iris", searchApp);
+
+      expect(firstResponse.statusCode).toBe(502);
+      expect(JSON.parse(firstResponse._getData())).toEqual({
+        error: "Met API returned a non-JSON search response.",
+        backoff: true,
+        scope: "met",
+        retryAfterMs: 1000
+      });
+      expect(cooldownResponse.statusCode).toBe(502);
+      expect(JSON.parse(cooldownResponse._getData())).toEqual({
+        error: "Met API returned a non-JSON search response.",
+        backoff: true,
+        scope: "met",
+        retryAfterMs: 500
+      });
+      expect(recoveredResponse.statusCode).toBe(200);
+      expect(JSON.parse(recoveredResponse._getData())).toEqual({
+        query: "iris",
+        results: [
+          {
+            objectId: 436524,
+            title: "Sunflowers",
+            artist: "Vincent van Gogh",
+            date: "1887",
+            imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DP130155.jpg",
+            isPublicDomain: false,
+            hasImage: true
+          }
+        ]
+      });
+      expect(searchRequests).toEqual([
+        "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&q=sunflowers",
+        "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&q=iris"
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("GET /api/search reuses cached results for the same query", async () => {
@@ -538,6 +671,169 @@ describe("search API", () => {
 });
 
 describe("gallery API", () => {
+  test("Met-backed routes share cooldown metadata after a detected Met challenge", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-09T00:00:00.000Z"));
+
+    const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    try {
+      const requests = [];
+      const metClient = createMetApiClient({
+        searchChallengeCooldownMs: 1000,
+        async fetchImpl(resource) {
+          const url = String(resource);
+          requests.push(url);
+
+          if (url.includes("/search?")) {
+            return createTextResponse("<html>blocked</html>", {
+              status: 403,
+              contentType: "text/html"
+            });
+          }
+
+          if (url.endsWith("/objects/436121")) {
+            return createJsonResponse({
+              objectID: 436121,
+              title: "The Great Wave off Kanagawa",
+              artistDisplayName: "",
+              culture: "Japanese",
+              objectDate: "ca. 1830-32",
+              objectName: "Print",
+              medium: "Polychrome woodblock print; ink and color on paper",
+              primaryImage: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+              primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg",
+              objectURL: "https://www.metmuseum.org/art/collection/search/45434"
+            });
+          }
+
+          throw new Error(`Unexpected Met API request: ${url}`);
+        }
+      });
+      const metApp = createArtctlApp({ metClient });
+
+      const galleryResponse = await makeRequest("/api/gallery", metApp);
+      vi.setSystemTime(new Date("2026-05-09T00:00:00.500Z"));
+      const searchResponse = await makeRequest("/api/search?q=wave", metApp);
+      const workResponse = await makeRequest("/api/works/436121", metApp);
+
+      expect(galleryResponse.statusCode).toBe(502);
+      expect(JSON.parse(galleryResponse._getData())).toEqual({
+        error: "The Met gallery is temporarily unavailable. Please try again.",
+        backoff: true,
+        scope: "met",
+        retryAfterMs: 1000
+      });
+      expect(searchResponse.statusCode).toBe(502);
+      expect(JSON.parse(searchResponse._getData())).toEqual({
+        error: "Met API returned a non-JSON search response.",
+        backoff: true,
+        scope: "met",
+        retryAfterMs: 500
+      });
+      expect(workResponse.statusCode).toBe(502);
+      expect(JSON.parse(workResponse._getData())).toEqual({
+        error: "Met API returned a non-JSON work response.",
+        backoff: true,
+        scope: "met",
+        retryAfterMs: 500
+      });
+      expect(requests).toEqual([
+        "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&isHighlight=true&q=*"
+      ]);
+      expect(consoleInfoSpy).toHaveBeenCalledWith(
+        "[met-api] cooldown started",
+        expect.objectContaining({
+          scope: "met",
+          retryAfterMs: 1000
+        })
+      );
+    } finally {
+      consoleInfoSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test("Met-backed routes resume normal responses after the cooldown window expires", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-09T00:00:00.000Z"));
+
+    const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+
+    try {
+      const requests = [];
+      const metClient = createMetApiClient({
+        searchChallengeCooldownMs: 1000,
+        async fetchImpl(resource) {
+          const url = String(resource);
+          requests.push(url);
+
+          if (url.includes("/search?")) {
+            return createTextResponse("<html>blocked</html>", {
+              status: 403,
+              contentType: "text/html"
+            });
+          }
+
+          if (url.endsWith("/objects/436121")) {
+            return createJsonResponse({
+              objectID: 436121,
+              title: "The Great Wave off Kanagawa",
+              artistDisplayName: "",
+              culture: "Japanese",
+              objectDate: "ca. 1830-32",
+              objectName: "Print",
+              medium: "Polychrome woodblock print; ink and color on paper",
+              primaryImage: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+              primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg",
+              objectURL: "https://www.metmuseum.org/art/collection/search/45434"
+            });
+          }
+
+          throw new Error(`Unexpected Met API request: ${url}`);
+        }
+      });
+      const metApp = createArtctlApp({ metClient });
+
+      const galleryResponse = await makeRequest("/api/gallery", metApp);
+
+      vi.setSystemTime(new Date("2026-05-09T00:00:00.500Z"));
+      const blockedWorkResponse = await makeRequest("/api/works/436121", metApp);
+
+      vi.setSystemTime(new Date("2026-05-09T00:00:01.001Z"));
+      const recoveredWorkResponse = await makeRequest("/api/works/436121", metApp);
+
+      expect(galleryResponse.statusCode).toBe(502);
+      expect(blockedWorkResponse.statusCode).toBe(502);
+      expect(JSON.parse(blockedWorkResponse._getData())).toEqual({
+        error: "Met API returned a non-JSON work response.",
+        backoff: true,
+        scope: "met",
+        retryAfterMs: 500
+      });
+      expect(recoveredWorkResponse.statusCode).toBe(200);
+      expect(JSON.parse(recoveredWorkResponse._getData())).toEqual({
+        objectId: 436121,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      });
+      expect(requests).toEqual([
+        "https://collectionapi.metmuseum.org/public/collection/v1/search?hasImages=true&isHighlight=true&q=*",
+        "https://collectionapi.metmuseum.org/public/collection/v1/objects/436121"
+      ]);
+      expect(consoleInfoSpy).toHaveBeenCalledWith("[met-api] cooldown cleared", {
+        scope: "met"
+      });
+    } finally {
+      consoleInfoSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   test("GET /api/gallery uses highlight search to build a deterministic gallery batch", async () => {
     const requests = [];
     const metClient = createMetApiClient({

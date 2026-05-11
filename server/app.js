@@ -22,6 +22,19 @@ function normalizeGalleryState(query = {}) {
   };
 }
 
+function buildMetErrorBody(metClient, errorMessage) {
+  const cooldownStatus = metClient.getCooldownStatus?.();
+
+  if (!cooldownStatus) {
+    return { error: errorMessage };
+  }
+
+  return {
+    error: errorMessage,
+    ...cooldownStatus
+  };
+}
+
 export function createArtctlApp({
   metClient = createMetApiClient(),
   serveSpa = true,
@@ -65,9 +78,7 @@ export function createArtctlApp({
       });
       response.json(results);
     } catch (error) {
-      response.status(502).json({
-        error: error.message
-      });
+      response.status(502).json(buildMetErrorBody(metClient, error.message));
     }
   });
 
@@ -76,9 +87,7 @@ export function createArtctlApp({
       const departments = await metClient.getDepartments();
       response.json(departments);
     } catch (error) {
-      response.status(502).json({
-        error: error.message
-      });
+      response.status(502).json(buildMetErrorBody(metClient, error.message));
     }
   });
 
@@ -87,9 +96,9 @@ export function createArtctlApp({
       const galleryPage = await metClient.getGalleryPage(normalizeGalleryState(request.query));
       response.json(galleryPage);
     } catch (error) {
-      response.status(502).json({
-        error: "The Met gallery is temporarily unavailable. Please try again."
-      });
+      response.status(502).json(
+        buildMetErrorBody(metClient, "The Met gallery is temporarily unavailable. Please try again.")
+      );
     }
   });
 
@@ -108,9 +117,7 @@ export function createArtctlApp({
     try {
       work = await metClient.getWork(objectId);
     } catch (error) {
-      response.status(502).json({
-        error: error.message
-      });
+      response.status(502).json(buildMetErrorBody(metClient, error.message));
       return;
     }
 
