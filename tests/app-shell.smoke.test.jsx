@@ -1,10 +1,16 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { beforeEach, expect, test } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import httpMocks from "node-mocks-http";
 import { App } from "../src/App.jsx";
 import { createArtctlApp } from "../server/app.js";
+import { createRuntimeCatalog } from "../server/catalog.js";
+import { runCatalogImport } from "../server/catalog-import.js";
 import { THEMES } from "../src/themes.js";
+import { createTrackedTempDir } from "./temp-dir.js";
 
 const defaultMetClient = {
   async getDepartments() {
@@ -24,17 +30,28 @@ const defaultMetClient = {
   }
 };
 
-function createFetchImpl({ requestLog = [], metClient = defaultMetClient } = {}) {
-  const apiApp = createArtctlApp({ metClient });
+function createFetchImpl({
+  requestLog = [],
+  metClient,
+  catalogDatabasePath = null,
+  hydrationFetchImpl
+} = {}) {
+  const apiApp = metClient
+    ? createArtctlApp({ metClient, allowLegacyMetRuntime: true })
+    : createArtctlApp({ catalogDatabasePath, hydrationFetchImpl });
 
-  return async function fetchImpl(resource) {
+  return async function fetchImpl(resource, init = {}) {
     const url = new URL(resource, "http://artctl.test");
-    requestLog.push(url.pathname + url.search);
+    const method = init.method ?? "GET";
+    requestLog.push(
+      method === "GET" ? `${url.pathname}${url.search}` : `${method} ${url.pathname}${url.search}`
+    );
 
     const request = httpMocks.createRequest({
-      method: "GET",
+      method,
       url: url.pathname,
-      query: Object.fromEntries(url.searchParams.entries())
+      query: Object.fromEntries(url.searchParams.entries()),
+      body: init.body ? JSON.parse(init.body) : undefined
     });
     const response = httpMocks.createResponse({ eventEmitter: EventEmitter });
 
@@ -52,6 +69,22 @@ function createFetchImpl({ requestLog = [], metClient = defaultMetClient } = {})
       }
     };
   };
+}
+
+async function seedAdminGallery(fetchImpl, objectIds) {
+  for (const objectId of objectIds) {
+    const response = await fetchImpl("http://artctl.test/api/admin/gallery", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ objectId })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Unable to seed admin gallery for object ${objectId}.`);
+    }
+  }
 }
 
 const fetchImpl = createFetchImpl();
@@ -98,10 +131,42 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[themes]" })).toBeInTheDocument();
 });
 
+test("homepage uses a wider route frame than standard pages", async () => {
+  window.history.pushState({}, "", "/");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  const galleryMain = screen.getByRole("main");
+  expect(galleryMain.className).toContain("max-w-7xl");
+
+  cleanup();
+  window.history.pushState({}, "", "/search");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  const searchMain = screen.getByRole("main");
+  expect(searchMain.className).toContain("max-w-[896px]");
+});
+
+test("work route uses the wider route frame", async () => {
+  window.history.pushState({}, "", "/works/42");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Work 42" })).toBeInTheDocument();
+  expect(screen.getByRole("main").className).toContain("max-w-7xl");
+});
+
 test.each([
   { route: "/", heading: "Gallery" },
   { route: "/search", heading: "Search" },
   { route: "/works/42", heading: "Work 42" },
+  { route: "/admin", heading: "Admin" },
+  { route: "/admin/curated-groups", heading: "Curated Groups" },
+  { route: "/admin/curated-groups/new", heading: "Create Curated Group" },
+  { route: "/admin/curated-groups/homepage", heading: "Homepage Gallery" },
   { route: "/help", heading: "Help" },
   { route: "/themes", heading: "Themes" }
 ])("route $route renders its skeleton inside the shared shell", async ({ route, heading }) => {
@@ -115,6 +180,540 @@ test.each([
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[themes]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
+});
+
+test("legacy /admin/gallery route no longer opens the curated group editor", async () => {
+  window.history.pushState({}, "", "/admin/gallery");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Admin Gallery" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Homepage Gallery" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("main")).not.toBeInTheDocument();
+});
+
+test("curated groups route renders a selectable text list of groups", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Curated Groups" })).toBeInTheDocument();
+  expect(requests).toContain("/api/admin/curated-groups");
+  expect(await screen.findByRole("link", { name: "Homepage Gallery" })).toHaveAttribute(
+    "href",
+    "/admin/curated-groups/homepage"
+  );
+  expect(screen.getByRole("link", { name: "Create Group" })).toHaveAttribute(
+    "href",
+    "/admin/curated-groups/new"
+  );
+  expect(screen.getByRole("main").className).toContain("max-w-[896px]");
+});
+
+test("create curated group route can create a new editorial group", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups/new");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Create Curated Group" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Group Slug"), {
+    target: { value: "featured-landscapes" }
+  });
+  fireEvent.change(screen.getByLabelText("Group Name"), {
+    target: { value: "Featured Landscapes" }
+  });
+  fireEvent.submit(screen.getByRole("button", { name: "Create Group" }).closest("form"));
+
+  expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toHaveAttribute(
+    "href",
+    "/admin/curated-groups/featured-landscapes"
+  );
+  expect(requests).toContain("POST /api/admin/curated-groups");
+});
+
+test("curated groups route can feature a group on the homepage", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const csvPath = path.join(tempDir, "featured-homepage-gallery.csv");
+  const requests = [];
+
+  writeFileSync(
+    csvPath,
+    "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain,Primary Image Small\n" +
+      "1,European Paintings,Homepage Work,Artist One,1900,Painting,Oil on canvas,True,https://images.metmuseum.org/small/1.jpg\n" +
+      "2,European Paintings,Featured Work 2,Artist Two,1901,Painting,Oil on canvas,True,https://images.metmuseum.org/small/2.jpg\n",
+    "utf8"
+  );
+
+  expect(
+    runCatalogImport({
+      csvPath,
+      databasePath
+    }).ok
+  ).toBe(true);
+  const catalog = createRuntimeCatalog({ databasePath });
+  const adminFetch = createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath });
+
+  expect(
+    await catalog.createAdminCuratedGroup({
+      slug: "featured-landscapes",
+      name: "Featured Landscapes"
+    })
+  ).toMatchObject({
+    slug: "featured-landscapes",
+    name: "Featured Landscapes"
+  });
+  expect(await catalog.addAdminGalleryItem(1)).toMatchObject({ objectId: 1 });
+  expect(await catalog.addAdminGalleryItem(2, { groupSlug: "featured-landscapes" })).toMatchObject({
+    objectId: 2
+  });
+
+  window.history.pushState({}, "", "/admin/curated-groups");
+  render(<App fetchImpl={adminFetch} />);
+
+  expect(await screen.findByRole("heading", { name: "Curated Groups" })).toBeInTheDocument();
+  fireEvent.click(await screen.findByRole("button", { name: "Feature Featured Landscapes" }));
+
+  await waitFor(() => {
+    expect(requests).toContain("PATCH /api/admin/curated-groups/featured-landscapes/feature");
+  });
+
+  cleanup();
+  window.history.pushState({}, "", "/");
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />);
+
+  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText("Featured Work 2")).toBeInTheDocument();
+  expect(screen.queryByText("Homepage Work")).not.toBeInTheDocument();
+});
+
+test("group detail route does not render group creation controls", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(<App fetchImpl={createFetchImpl({ catalogDatabasePath: databasePath })} />);
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Group Slug")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Group Name")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Create Group" })).not.toBeInTheDocument();
+});
+
+test("curated groups route can open a selected group at its slug route", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+  const adminFetch = createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath });
+
+  window.history.pushState({}, "", "/admin/curated-groups");
+
+  render(<App fetchImpl={adminFetch} />);
+
+  expect(await screen.findByRole("heading", { name: "Curated Groups" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "Homepage Gallery" })).toHaveAttribute(
+    "href",
+    "/admin/curated-groups/homepage"
+  );
+
+  fireEvent.click(screen.getByRole("link", { name: "Homepage Gallery" }));
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  await waitFor(() => {
+    expect(requests).toContain("/api/admin/gallery");
+  });
+  expect(window.location.pathname).toBe("/admin/curated-groups/homepage");
+});
+
+test("admin landing route lets me choose curated groups management", async () => {
+  const requests = [];
+
+  window.history.pushState({}, "", "/admin");
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
+
+  expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", {
+      name: "Curated Groups Manage editorial groups and homepage curation."
+    })
+  ).toHaveAttribute(
+    "href",
+    "/admin/curated-groups"
+  );
+  expect(screen.getByText("Manage editorial groups and homepage curation.")).toBeInTheDocument();
+  expect(requests).toEqual(["/api/app-shell"]);
+});
+
+test("admin gallery route can add a local object id into the curated gallery list", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const csvPath = path.join(tempDir, "admin-gallery.csv");
+  const requests = [];
+
+  writeFileSync(
+    csvPath,
+    "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain\n" +
+      Array.from({ length: 25 }, (_, index) => {
+        const objectId = index + 1;
+        return `${objectId},European Paintings,Curated Work ${objectId},Artist ${objectId},1900,Painting,Oil on canvas,True`;
+      }).join("\n") +
+      "\n",
+    "utf8"
+  );
+
+  expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(screen.queryByText("Curated Work 25")).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Object ID"), {
+    target: { value: "25" }
+  });
+  fireEvent.submit(screen.getByRole("button", { name: "Add to Gallery" }).closest("form"));
+
+  expect(await screen.findByText("Curated Work 25")).toBeInTheDocument();
+  expect(screen.getByText("1 · 25 · pending")).toBeInTheDocument();
+  expect(requests).toContain("POST /api/admin/gallery");
+});
+
+test("group detail route can add multiple object ids from a comma-separated list", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const csvPath = path.join(tempDir, "admin-gallery-batch.csv");
+  const requests = [];
+
+  writeFileSync(
+    csvPath,
+    "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain\n" +
+      Array.from({ length: 27 }, (_, index) => {
+        const objectId = index + 1;
+        return `${objectId},European Paintings,Curated Work ${objectId},Artist ${objectId},1900,Painting,Oil on canvas,True`;
+      }).join("\n") +
+      "\n",
+    "utf8"
+  );
+
+  expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Object ID"), {
+    target: { value: "25, 26,27" }
+  });
+  fireEvent.submit(screen.getByRole("button", { name: "Add to Gallery" }).closest("form"));
+
+  expect(await screen.findByText("Curated Work 25")).toBeInTheDocument();
+  expect(await screen.findByText("Curated Work 26")).toBeInTheDocument();
+  expect(await screen.findByText("Curated Work 27")).toBeInTheDocument();
+  expect(screen.getByText("1 · 25 · pending")).toBeInTheDocument();
+  expect(screen.getByText("2 · 26 · pending")).toBeInTheDocument();
+  expect(screen.getByText("3 · 27 · pending")).toBeInTheDocument();
+  expect(requests.filter((request) => request === "POST /api/admin/gallery")).toHaveLength(3);
+});
+
+test("admin gallery route can remove a curated item and reflow the remaining positions", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+  await seedAdminGallery(createFetchImpl({ catalogDatabasePath: databasePath }), [4926, 5046]);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText("Mantel")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Remove Mantel" }));
+
+  await waitFor(() => {
+    expect(screen.queryByText("Mantel")).not.toBeInTheDocument();
+  });
+  expect(screen.getByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  expect(screen.getByText("1 · 5046 · pending")).toBeInTheDocument();
+  expect(requests).toContain("DELETE /api/admin/gallery/4926");
+});
+
+test("admin gallery route can drag a curated item onto another card and update the displayed order", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+  await seedAdminGallery(createFetchImpl({ catalogDatabasePath: databasePath }), [4926, 5046]);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  const cards = screen.getAllByRole("listitem");
+  const draggedCard = cards.find((card) => card.textContent.includes('The "Shipwreck Medal"'));
+  const targetCard = cards.find((card) => card.textContent.includes("Mantel"));
+
+  fireEvent.dragStart(draggedCard);
+  fireEvent.dragOver(targetCard);
+  fireEvent.drop(targetCard);
+
+  await waitFor(() => {
+    const reorderedCards = screen.getAllByRole("listitem");
+    expect(reorderedCards[0]).toHaveTextContent('The "Shipwreck Medal"');
+    expect(reorderedCards[1]).toHaveTextContent("Mantel");
+  });
+  expect(screen.getByText("1 · 5046 · pending")).toBeInTheDocument();
+  expect(screen.getByText("2 · 4926 · pending")).toBeInTheDocument();
+  expect(requests).toContain("PATCH /api/admin/gallery/reorder");
+});
+
+test("admin gallery route shows explicit drag-reorder affordances on curated cards", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+  await seedAdminGallery(createFetchImpl({ catalogDatabasePath: databasePath }), [4926, 5046]);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(<App fetchImpl={createFetchImpl({ catalogDatabasePath: databasePath })} />);
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  expect(
+    screen.getByText("Drag a card onto another card to reorder the curated gallery.")
+  ).toBeInTheDocument();
+  expect(screen.getAllByText("Drag to reorder")).toHaveLength(2);
+});
+
+test("admin gallery route highlights the current drop target while dragging", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+  await seedAdminGallery(createFetchImpl({ catalogDatabasePath: databasePath }), [4926, 5046]);
+  await seedAdminGallery(createFetchImpl({ catalogDatabasePath: databasePath }), [4926, 5046]);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(<App fetchImpl={createFetchImpl({ catalogDatabasePath: databasePath })} />);
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  const cards = screen.getAllByRole("listitem");
+  const draggedCard = cards.find((card) => card.textContent.includes('The "Shipwreck Medal"'));
+  const targetCard = cards.find((card) => card.textContent.includes("Mantel"));
+
+  fireEvent.dragStart(draggedCard);
+  fireEvent.dragOver(targetCard);
+
+  expect(targetCard).toHaveTextContent("Drop here");
+  expect(targetCard.className).toContain("admin-gallery-drop-target");
+});
+
+test("admin gallery route can manually hydrate a curated item and update its card", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+  const hydrationFetchImpl = async (url) => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === "content-type" ? "application/json" : null;
+      }
+    },
+    async json() {
+      expect(String(url)).toBe(
+        "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
+      );
+
+      return {
+        primaryImage: "https://images.metmuseum.org/primary/5046.jpg",
+        primaryImageSmall: "https://images.metmuseum.org/small/5046.jpg"
+      };
+    }
+  });
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+  await seedAdminGallery(
+    createFetchImpl({ catalogDatabasePath: databasePath, hydrationFetchImpl }),
+    [4926, 5046]
+  );
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        requestLog: requests,
+        catalogDatabasePath: databasePath,
+        hydrationFetchImpl
+      })}
+    />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: 'Hydrate The "Shipwreck Medal"' }));
+
+  await waitFor(() => {
+    expect(screen.getByText("2 · 5046 · hydrated")).toBeInTheDocument();
+  });
+  expect(screen.getByRole("img", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
+    "src",
+    "https://images.metmuseum.org/small/5046.jpg"
+  );
+  expect(requests).toContain("POST /api/admin/gallery/5046/hydrate");
+});
+
+test("homepage uses hydrated curated entries from the admin-managed gallery list", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  const hydrateFetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === "content-type" ? "application/json" : null;
+      }
+    },
+    async json() {
+      return {
+        primaryImage: "https://images.metmuseum.org/primary/5046.jpg",
+        primaryImageSmall: "https://images.metmuseum.org/small/5046.jpg"
+      };
+    }
+  });
+  const adminFetch = createFetchImpl({
+    requestLog: requests,
+    catalogDatabasePath: databasePath,
+    hydrationFetchImpl: hydrateFetchImpl
+  });
+  await seedAdminGallery(adminFetch, [4926, 5046]);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+  render(<App fetchImpl={adminFetch} />);
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: 'Hydrate The "Shipwreck Medal"' }));
+  await waitFor(() => {
+    expect(screen.getByText("2 · 5046 · hydrated")).toBeInTheDocument();
+  });
+
+  cleanup();
+  window.history.pushState({}, "", "/");
+
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        requestLog: requests,
+        catalogDatabasePath: databasePath,
+        hydrationFetchImpl: hydrateFetchImpl
+      })}
+    />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  expect(screen.getByText('The "Shipwreck Medal"').closest("a")).toHaveAttribute("href", "/works/5046");
+  expect(screen.queryByRole("link", { name: "Mantel" })).not.toBeInTheDocument();
 });
 
 test("search route keeps its content on the shared shell background", async () => {
@@ -183,6 +782,231 @@ test("homepage renders highlighted Met works from Express as gallery links", asy
   expect(requests).toContain("/api/gallery");
   expect(screen.queryByRole("button", { name: "Shuffle" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Load More" })).not.toBeInTheDocument();
+});
+
+test("homepage shows catalog readiness messaging through the default Express app path", async () => {
+  const requests = [];
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
+
+  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText("Catalog is not initialized.")).toBeInTheDocument();
+  expect(requests).toContain("/api/gallery");
+});
+
+test("search route renders results from a configured SQLite catalog path through the default Express app path", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/search?q=shipwreck");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
+    "href",
+    "/works/5046"
+  );
+  expect(screen.getByText("Salathiel Ellis · 1845–57 · The American Wing")).toBeInTheDocument();
+  expect(requests).toContain("/api/search/departments");
+  expect(requests).toContain("/api/search?q=shipwreck");
+});
+
+test("search route supports multi-token SQLite FTS queries through the default Express app path", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/search?q=medal%20shipwreck");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
+    "href",
+    "/works/5046"
+  );
+  expect(screen.getByText("Salathiel Ellis · 1845–57 · The American Wing")).toBeInTheDocument();
+  expect(requests).toContain("/api/search?q=medal+shipwreck");
+});
+
+test("search route applies the department filter on top of SQLite FTS results through the default Express app path", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/search?q=medal&departmentId=1");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
+    "href",
+    "/works/5046"
+  );
+  expect(screen.getByLabelText("Department")).toHaveValue("1");
+  expect(screen.getByText("Salathiel Ellis · 1845–57 · The American Wing")).toBeInTheDocument();
+  expect(requests).toContain("/api/search/departments");
+  expect(requests).toContain("/api/search?q=medal&departmentId=1");
+});
+
+test("search route supports quoted phrase SQLite FTS queries through the default Express app path", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/search?q=%22shipwreck%20medal%22");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
+    "href",
+    "/works/5046"
+  );
+  expect(screen.getByDisplayValue('"shipwreck medal"')).toBeInTheDocument();
+  expect(requests).toContain("/api/search?q=%22shipwreck+medal%22");
+});
+
+test("search route keeps quoted phrase SQLite FTS queries empty when the phrase does not exist", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/search?q=%22medal%20mantel%22");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(screen.getByDisplayValue('"medal mantel"')).toBeInTheDocument();
+  await waitFor(() => {
+    expect(requests).toContain("/api/search?q=%22medal+mantel%22");
+  });
+  expect(screen.queryByRole("link", { name: 'The "Shipwreck Medal"' })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Mantel" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Salathiel Ellis · 1845–57 · The American Wing")).not.toBeInTheDocument();
+});
+
+test("work route renders details from a configured SQLite catalog path through the default Express app path", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/works/5046");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: 'The "Shipwreck Medal"' })).toBeInTheDocument();
+  expect(screen.getByText("Salathiel Ellis")).toBeInTheDocument();
+  expect(screen.getByText("1845–57")).toBeInTheDocument();
+  expect(screen.getByText("Medal - Bronze")).toBeInTheDocument();
+  expect(screen.getByText("Image unavailable through the Met API.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
+    "href",
+    "http://www.metmuseum.org/art/collection/search/5046"
+  );
+  expect(requests).toContain("/api/works/5046");
+});
+
+test("homepage shows the empty gallery state from a configured SQLite catalog path when no curated images exist", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText("Gallery coming soon")).toBeInTheDocument();
+  expect(screen.getByText("Curated groups have not been configured yet.")).toBeInTheDocument();
+  expect(screen.queryByText("Catalog is not initialized.")).not.toBeInTheDocument();
+  expect(requests).toContain("/api/gallery");
+});
+
+test("homepage uses persisted Met image URLs for SQLite gallery cards", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const csvPath = path.join(tempDir, "with-images.csv");
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+
+  writeFileSync(
+    csvPath,
+    "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain,Primary Image Small,Primary Image\n" +
+      "1,European Paintings,Image Work,Artist One,1900,Painting,Oil on canvas,True,https://images.metmuseum.org/CRDImages/test/web-large/1.jpg,https://images.metmuseum.org/CRDImages/test/original/1.jpg\n",
+    "utf8"
+  );
+
+  expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+  await seedAdminGallery(createFetchImpl({ catalogDatabasePath: databasePath }), [1]);
+
+  render(<App fetchImpl={createFetchImpl({ catalogDatabasePath: databasePath })} />);
+
+  expect(await screen.findByRole("img", { name: "Image Work" })).toHaveAttribute(
+    "src",
+    "https://images.metmuseum.org/CRDImages/test/web-large/1.jpg"
+  );
 });
 
 test("homepage renders gallery cards as themed surfaces while preserving links and copy", async () => {
@@ -294,6 +1118,41 @@ test("homepage preserves gallery image and placeholder treatment inside themed m
   expect(placeholder).toHaveClass("bg-muted");
 });
 
+test("homepage falls back to a placeholder when an artist card image fails to load", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            artist: "Vincent van Gogh",
+            artistSlug: "vincent-van-gogh",
+            imageUrl: "https://images.metmuseum.org/CRDImages/broken/web-large/van-gogh.jpg",
+            workCount: 50
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "Vincent van Gogh" });
+  fireEvent.error(image);
+
+  expect(screen.getByRole("link", { name: /Vincent van Gogh 50 works/i })).toHaveAttribute(
+    "href",
+    "/artists/vincent-van-gogh"
+  );
+  expect(screen.getByText("Vincent van Gogh")).toBeInTheDocument();
+  expect(screen.getByText("50 works")).toBeInTheDocument();
+  expect(screen.queryByRole("img", { name: "Vincent van Gogh" })).not.toBeInTheDocument();
+  expect(
+    screen.getByText((_, element) =>
+      Boolean(element?.classList.contains("gallery-card-image-placeholder"))
+    )
+  ).toHaveClass("bg-muted");
+});
+
 test("homepage shows a friendly message when Express cannot load the Met gallery", async () => {
   const metClient = {
     async getGalleryPage() {
@@ -307,6 +1166,26 @@ test("homepage shows a friendly message when Express cannot load the Met gallery
     await screen.findByText("The Met gallery is temporarily unavailable. Please try again.")
   ).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /Sunflowers/i })).not.toBeInTheDocument();
+});
+
+test("homepage renders an explicit gallery empty state from Express", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [],
+        emptyState: {
+          title: "Gallery coming soon",
+          message: "Curated groups have not been configured yet."
+        }
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByText("Gallery coming soon")).toBeInTheDocument();
+  expect(screen.getByText("Curated groups have not been configured yet.")).toBeInTheDocument();
+  expect(screen.queryByRole("list")).not.toBeInTheDocument();
 });
 
 test("search route shows an empty state before any query is submitted", async () => {
@@ -675,6 +1554,7 @@ test("search results show inline availability markers for rights and image statu
             title: "Sunflowers",
             artist: "Vincent van Gogh",
             date: "1887",
+            department: "European Paintings",
             imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
             isPublicDomain: true,
             hasImage: true
@@ -684,6 +1564,7 @@ test("search results show inline availability markers for rights and image statu
             title: "Galisteo Creek",
             artist: "Susan Rothenberg",
             date: "1992",
+            department: "Modern and Contemporary Art",
             imageUrl: "",
             isPublicDomain: false,
             hasImage: false
@@ -698,6 +1579,8 @@ test("search results show inline availability markers for rights and image statu
 
   expect(await screen.findByRole("link", { name: "Sunflowers" })).toBeInTheDocument();
   expect(await screen.findByRole("link", { name: "Galisteo Creek" })).toBeInTheDocument();
+  expect(screen.getByText(/Vincent van Gogh .* European Paintings/i)).toBeInTheDocument();
+  expect(screen.getByText(/Susan Rothenberg .* Modern and Contemporary Art/i)).toBeInTheDocument();
   expect(screen.getByText("Rights Restricted")).toBeInTheDocument();
   expect(screen.getByText("No Image Available")).toBeInTheDocument();
 });

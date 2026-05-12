@@ -36,7 +36,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }, [apiBaseUrl, fetchImpl, objectId]);
 
   return (
-    <RouteFrame title={work?.title || `Work ${objectId}`}>
+    <RouteFrame title={work?.title || `Work ${objectId}`} maxWidthClassName="max-w-7xl">
       {work ? (
         <div
           className="work-viewer mt-4 grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)] sm:items-start"

@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import express from "express";
 import { createMetApiClient } from "./met-api.js";
+import { MetHydrationAbortError, runCatalogHydration } from "./catalog-hydrate.js";
+import { createRuntimeCatalog, createUninitializedCatalog } from "./catalog.js";
+import { loadCuratedArtistIndex } from "./curated-gallery.js";
+import { curatedGalleryRecords } from "./curated-gallery-records.js";
 
 const defaultSpaHtmlPath = path.resolve(process.cwd(), "index.html");
 
@@ -13,6 +17,11 @@ function normalizePositiveInteger(value, defaultValue = 1) {
   const parsedValue = Number.parseInt(value ?? "", 10);
 
   return Number.isNaN(parsedValue) || parsedValue < 1 ? defaultValue : parsedValue;
+}
+
+function normalizeCuratedGroupSlug(value) {
+  const normalizedGroupSlug = String(value ?? "").trim();
+  return normalizedGroupSlug || "homepage";
 }
 
 function buildMetErrorBody(metClient, errorMessage) {
@@ -28,13 +37,44 @@ function buildMetErrorBody(metClient, errorMessage) {
   };
 }
 
-export function createArtctlApp({
-  metClient = createMetApiClient(),
-  serveSpa = true,
-  spaHtmlPath = defaultSpaHtmlPath,
-  staticDir = null
-} = {}) {
+function buildCatalogNotReadyBody() {
+  return {
+    error: "Catalog is not initialized.",
+    scope: "catalog",
+    code: "CATALOG_NOT_INITIALIZED"
+  };
+}
+
+function ensureCatalogReady(response, catalog) {
+  if (!catalog || catalog.isReady()) {
+    return true;
+  }
+
+  response.status(503).json(catalog.getReadiness?.() ?? buildCatalogNotReadyBody());
+  return false;
+}
+
+export function createArtctlApp(options = {}) {
+  const {
+    metClient = createMetApiClient({ curatedGalleryRecords }),
+    serveSpa = true,
+    spaHtmlPath = defaultSpaHtmlPath,
+    staticDir = null,
+    catalogDatabasePath = null,
+    hydrationFetchImpl = fetch,
+    hydrationSleepImpl,
+    hydrationRandomImpl,
+    allowLegacyMetRuntime = false
+  } = options;
+  const defaultCatalog = catalogDatabasePath
+    ? createRuntimeCatalog({ databasePath: catalogDatabasePath })
+    : allowLegacyMetRuntime
+      ? null
+      : createUninitializedCatalog();
+  const catalog = Object.hasOwn(options, "catalog") ? (options.catalog ?? null) : defaultCatalog;
   const app = express();
+
+  app.use(express.json());
 
   app.get("/api/app-shell", (_request, response) => {
     response.json({
@@ -44,12 +84,17 @@ export function createArtctlApp({
         { href: "/", label: "Gallery" },
         { href: "/search", label: "Search" },
         { href: "/help", label: "Help" },
-        { href: "/themes", label: "Themes" }
+        { href: "/themes", label: "Themes" },
+        { href: "/admin", label: "Admin" }
       ]
     });
   });
 
   app.get("/api/search", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
     const query = request.query.q?.trim();
     const departmentId = request.query.departmentId?.trim();
     const medium = request.query.medium?.trim() ?? "";
@@ -59,6 +104,17 @@ export function createArtctlApp({
       response.status(400).json({
         error: "Query is required."
       });
+      return;
+    }
+
+    if (catalog?.searchCollection) {
+      const results = await catalog.searchCollection({
+        query,
+        departmentId: departmentId ? normalizePositiveInteger(departmentId, null) : null,
+        medium,
+        page
+      });
+      response.json(results);
       return;
     }
 
@@ -76,6 +132,16 @@ export function createArtctlApp({
   });
 
   app.get("/api/search/departments", async (_request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    if (catalog?.getDepartments) {
+      const departments = await catalog.getDepartments();
+      response.json(departments);
+      return;
+    }
+
     try {
       const departments = await metClient.getDepartments();
       response.json(departments);
@@ -85,6 +151,16 @@ export function createArtctlApp({
   });
 
   app.get("/api/gallery", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    if (catalog?.getGalleryPage) {
+      const galleryPage = await catalog.getGalleryPage();
+      response.json(galleryPage);
+      return;
+    }
+
     try {
       const galleryPage = await metClient.getGalleryPage();
       response.json(galleryPage);
@@ -95,13 +171,360 @@ export function createArtctlApp({
     }
   });
 
+  app.get("/api/admin/gallery", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const groupSlug = normalizeCuratedGroupSlug(request.query.groupSlug);
+
+    if (catalog?.getAdminGallery) {
+      const gallery = await catalog.getAdminGallery({ groupSlug });
+      response.json(gallery);
+      return;
+    }
+
+    response.json({ results: [] });
+  });
+
+  app.get("/api/admin/curated-groups", async (_request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    if (catalog?.getAdminCuratedGroups) {
+      const groups = await catalog.getAdminCuratedGroups();
+      response.json(groups);
+      return;
+    }
+
+    response.json({ results: [] });
+  });
+
+  app.post("/api/admin/curated-groups", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const slug = String(request.body?.slug ?? "").trim();
+    const name = String(request.body?.name ?? "").trim();
+
+    if (!slug || !name) {
+      response.status(400).json({
+        error: "Curated group slug and name are required."
+      });
+      return;
+    }
+
+    if (!catalog?.createAdminCuratedGroup) {
+      response.status(501).json({
+        error: "Curated group editing is not supported."
+      });
+      return;
+    }
+
+    const group = await catalog.createAdminCuratedGroup({ slug, name });
+
+    if (group?.error) {
+      response.status(409).json({
+        error: group.error
+      });
+      return;
+    }
+
+    response.status(201).json({
+      ok: true,
+      group
+    });
+  });
+
+  app.patch("/api/admin/curated-groups/:slug/feature", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    if (!catalog?.featureAdminCuratedGroup) {
+      response.status(501).json({
+        error: "Curated group editing is not supported."
+      });
+      return;
+    }
+
+    const group = await catalog.featureAdminCuratedGroup(request.params.slug);
+
+    if (!group) {
+      response.status(404).json({
+        error: "Curated group not found."
+      });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      group
+    });
+  });
+
+  app.post("/api/admin/gallery", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const objectId = Number.parseInt(String(request.body?.objectId ?? ""), 10);
+    const groupSlug = normalizeCuratedGroupSlug(request.body?.groupSlug);
+
+    if (Number.isNaN(objectId)) {
+      response.status(400).json({
+        error: "Object ID must be a number."
+      });
+      return;
+    }
+
+    if (!catalog?.addAdminGalleryItem) {
+      response.status(501).json({
+        error: "Admin gallery editing is not supported."
+      });
+      return;
+    }
+
+    const item = await catalog.addAdminGalleryItem(objectId, { groupSlug });
+
+    if (!item) {
+      response.status(404).json({
+        error: "Work not found."
+      });
+      return;
+    }
+
+    response.status(201).json({
+      ok: true,
+      item
+    });
+  });
+
+  app.delete("/api/admin/gallery/:objectId", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const objectId = Number.parseInt(request.params.objectId, 10);
+    const groupSlug = normalizeCuratedGroupSlug(request.query.groupSlug);
+
+    if (Number.isNaN(objectId)) {
+      response.status(400).json({
+        error: "Object ID must be a number."
+      });
+      return;
+    }
+
+    if (!catalog?.removeAdminGalleryItem) {
+      response.status(501).json({
+        error: "Admin gallery editing is not supported."
+      });
+      return;
+    }
+
+    const removed = await catalog.removeAdminGalleryItem(objectId, { groupSlug });
+
+    if (!removed) {
+      response.status(404).json({
+        error: "Curated gallery item not found."
+      });
+      return;
+    }
+
+    response.json({
+      ok: true
+    });
+  });
+
+  app.patch("/api/admin/gallery/:objectId/move-up", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const objectId = Number.parseInt(request.params.objectId, 10);
+    const groupSlug = normalizeCuratedGroupSlug(request.query.groupSlug);
+
+    if (Number.isNaN(objectId)) {
+      response.status(400).json({
+        error: "Object ID must be a number."
+      });
+      return;
+    }
+
+    if (!catalog?.moveAdminGalleryItemUp) {
+      response.status(501).json({
+        error: "Admin gallery editing is not supported."
+      });
+      return;
+    }
+
+    const item = await catalog.moveAdminGalleryItemUp(objectId, { groupSlug });
+
+    if (!item) {
+      response.status(404).json({
+        error: "Curated gallery item not found."
+      });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      item
+    });
+  });
+
+  app.patch("/api/admin/gallery/reorder", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const objectId = Number.parseInt(String(request.body?.objectId ?? ""), 10);
+    const targetObjectId = Number.parseInt(String(request.body?.targetObjectId ?? ""), 10);
+    const groupSlug = normalizeCuratedGroupSlug(request.body?.groupSlug);
+
+    if (Number.isNaN(objectId) || Number.isNaN(targetObjectId)) {
+      response.status(400).json({
+        error: "Object IDs must be numbers."
+      });
+      return;
+    }
+
+    if (!catalog?.reorderAdminGalleryItem) {
+      response.status(501).json({
+        error: "Admin gallery editing is not supported."
+      });
+      return;
+    }
+
+    const gallery = await catalog.reorderAdminGalleryItem(objectId, targetObjectId, { groupSlug });
+
+    if (!gallery) {
+      response.status(404).json({
+        error: "Curated gallery item not found."
+      });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      results: gallery.results ?? []
+    });
+  });
+
+  app.post("/api/admin/gallery/:objectId/hydrate", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const objectId = Number.parseInt(request.params.objectId, 10);
+    const groupSlug = normalizeCuratedGroupSlug(request.query.groupSlug);
+
+    if (Number.isNaN(objectId)) {
+      response.status(400).json({
+        error: "Object ID must be a number."
+      });
+      return;
+    }
+
+    if (!catalogDatabasePath) {
+      response.status(501).json({
+        error: "Admin gallery hydration is not supported."
+      });
+      return;
+    }
+
+    const gallery = await catalog.getAdminGallery?.({ groupSlug });
+    const existingItem = gallery?.results?.find((item) => item.objectId === objectId);
+
+    if (!existingItem) {
+      response.status(404).json({
+        error: "Curated gallery item not found."
+      });
+      return;
+    }
+
+    try {
+      await runCatalogHydration({
+        databasePath: catalogDatabasePath,
+        limit: 1,
+        objectIds: [objectId],
+        fetchImpl: hydrationFetchImpl,
+        sleepImpl: hydrationSleepImpl,
+        randomImpl: hydrationRandomImpl
+      });
+    } catch (error) {
+      response.status(error instanceof MetHydrationAbortError ? 502 : 500).json({
+        error: error instanceof Error ? error.message : String(error),
+        ...(error instanceof MetHydrationAbortError
+          ? {
+              code: error.code,
+              abortedOnObjectId: error.objectId
+            }
+          : {})
+      });
+      return;
+    }
+
+    const updatedGallery = await catalog.getAdminGallery?.({ groupSlug });
+    const item = updatedGallery?.results?.find((candidate) => candidate.objectId === objectId);
+
+    if (!item) {
+      response.status(404).json({
+        error: "Curated gallery item not found."
+      });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      item
+    });
+  });
+
+  app.get("/api/artists/:artistSlug", async (request, response) => {
+    try {
+      const artistGallery = await metClient.getArtistGallery?.(request.params.artistSlug);
+
+      if (!artistGallery) {
+        response.status(404).json({
+          error: "Artist gallery not found."
+        });
+        return;
+      }
+
+      response.json(artistGallery);
+    } catch (error) {
+      response.status(502).json(buildMetErrorBody(metClient, "Unable to load artist gallery."));
+    }
+  });
+
   app.get("/api/works/:objectId", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
     const objectId = Number.parseInt(request.params.objectId, 10);
 
     if (Number.isNaN(objectId)) {
       response.status(400).json({
         error: "Object ID must be a number."
       });
+      return;
+    }
+
+    if (catalog?.getWork) {
+      const work = await catalog.getWork(objectId);
+
+      if (!work) {
+        response.status(404).json({
+          error: "Work not found."
+        });
+        return;
+      }
+
+      response.json(work);
       return;
     }
 

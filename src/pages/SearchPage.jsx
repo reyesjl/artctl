@@ -258,6 +258,9 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                 <Link className="font-medium text-primary" to={`/works/${result.objectId}`}>
                   {result.title}
                 </Link>
+                <p className="search-result-meta mt-1 text-sm text-muted-foreground">
+                  {[result.artist, result.date, result.department].filter(Boolean).join(" · ")}
+                </p>
                 {!result.isPublicDomain || !result.hasImage ? (
                   <p className="search-result-flags mt-2 flex flex-wrap gap-2">
                     {!result.isPublicDomain ? (

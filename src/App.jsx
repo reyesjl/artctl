@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import { AdminPage } from "./pages/AdminPage.jsx";
+import { AdminGalleryPage } from "./pages/AdminGalleryPage.jsx";
+import { CreateCuratedGroupPage } from "./pages/CreateCuratedGroupPage.jsx";
+import { CuratedGroupsPage } from "./pages/CuratedGroupsPage.jsx";
 import { HelpPage } from "./pages/HelpPage.jsx";
 import { HomePage } from "./pages/HomePage.jsx";
 import { SearchPage } from "./pages/SearchPage.jsx";
@@ -46,6 +50,22 @@ function AppShell({ shell, apiBaseUrl, fetchImpl }) {
         <Route
           path="/works/:objectId"
           element={<WorkPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+        />
+        <Route
+          path="/admin"
+          element={<AdminPage />}
+        />
+        <Route
+          path="/admin/curated-groups"
+          element={<CuratedGroupsPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+        />
+        <Route
+          path="/admin/curated-groups/new"
+          element={<CreateCuratedGroupPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+        />
+        <Route
+          path="/admin/curated-groups/:groupSlug"
+          element={<AdminGalleryPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
         />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/themes" element={<ThemesPage />} />

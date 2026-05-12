@@ -1,12 +1,31 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createServer as createViteServer } from "vite";
 import { createArtctlApp } from "./app.js";
+import { loadArtctlEnv, resolveCatalogDatabasePath } from "./local-env.js";
 
-const port = Number(process.env.PORT ?? 3000);
+function resolveDevServerOptions(processEnv = process.env) {
+  const resolvedEnv = loadArtctlEnv(processEnv);
 
-async function start() {
-  const app = createArtctlApp({ serveSpa: false });
+  return {
+    port: Number(resolvedEnv.PORT ?? 3000),
+    catalogDatabasePath: resolveCatalogDatabasePath(processEnv)
+  };
+}
+
+export function createDevArtctlApp(processEnv = process.env) {
+  const { catalogDatabasePath } = resolveDevServerOptions(processEnv);
+
+  return createArtctlApp({
+    serveSpa: false,
+    catalogDatabasePath
+  });
+}
+
+export async function startDevServer(processEnv = process.env) {
+  const { port } = resolveDevServerOptions(processEnv);
+  const app = createDevArtctlApp(processEnv);
   const vite = await createViteServer({
     appType: "custom",
     server: { middlewareMode: true }
@@ -31,4 +50,6 @@ async function start() {
   });
 }
 
-start();
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  startDevServer(process.env);
+}

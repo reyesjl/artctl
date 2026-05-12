@@ -1,3 +1,5 @@
+import { loadCuratedArtistGallery, loadCuratedArtistIndex } from "./curated-gallery.js";
+
 const metApiBaseUrl = "https://collectionapi.metmuseum.org/public/collection/v1";
 const defaultCacheTtlMs = 5 * 60 * 1000;
 const defaultRequestTimeoutMs = 8 * 1000;
@@ -171,6 +173,7 @@ export function createMetApiClient({
   maxRetries = defaultMaxRetries,
   challengeCooldownMs = defaultChallengeCooldownMs,
   searchChallengeCooldownMs = challengeCooldownMs,
+  curatedGalleryRecords = null,
   logger = console
 } = {}) {
   const searchCache = new Map();
@@ -487,6 +490,14 @@ export function createMetApiClient({
         return cachedResult;
       }
 
+      if (Array.isArray(curatedGalleryRecords)) {
+        const result = loadCuratedArtistIndex({
+          records: curatedGalleryRecords
+        });
+        setCachedValue(galleryCache, cacheKey, result);
+        return result;
+      }
+
       try {
         const gallerySearchUrl = new URL(`${metApiBaseUrl}/search`);
         gallerySearchUrl.searchParams.set("hasImages", "true");
@@ -536,6 +547,17 @@ export function createMetApiClient({
 
         throw error;
       }
+    },
+
+    async getArtistGallery(artistSlug) {
+      if (Array.isArray(curatedGalleryRecords)) {
+        return loadCuratedArtistGallery({
+          artistSlug,
+          records: curatedGalleryRecords
+        });
+      }
+
+      return null;
     },
 
     async getWork(objectId) {

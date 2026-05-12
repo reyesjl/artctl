@@ -1,15 +1,24 @@
 import { EventEmitter } from "node:events";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import { DatabaseSync } from "node:sqlite";
+import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import httpMocks from "node-mocks-http";
 import { createArtctlApp } from "../server/app.js";
+import { createUninitializedCatalog } from "../server/catalog.js";
+import { runCatalogImport } from "../server/catalog-import.js";
+import { initializeCatalogSqlite } from "../server/catalog-sqlite.js";
 import { createMetApiClient } from "../server/met-api.js";
+import { createTrackedTempDir } from "./temp-dir.js";
 
 const app = createArtctlApp();
 
-async function makeRequest(url, targetApp = app) {
+async function makeRequest(url, targetApp = app, { method = "GET", body = null } = {}) {
   const request = httpMocks.createRequest({
-    method: "GET",
-    url
+    method,
+    url,
+    body
   });
   const response = httpMocks.createResponse({ eventEmitter: EventEmitter });
 
@@ -77,7 +86,811 @@ describe("SPA route refresh", () => {
   );
 });
 
+describe("configured SQLite catalog runtime", () => {
+  test("GET /api/search serves local catalog results from a configured SQLite database path", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const searchApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/search?q=shipwreck", searchApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      query: "shipwreck",
+      results: [
+        {
+          objectId: 5046,
+          title: 'The "Shipwreck Medal"',
+          artist: "Salathiel Ellis",
+          date: "1845–57",
+          department: "The American Wing",
+          imageUrl: "",
+          isPublicDomain: true,
+          hasImage: false
+        }
+      ]
+    });
+  });
+
+  test("GET /api/gallery serves SQLite-backed gallery work cards from a configured database path", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const galleryApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/gallery", galleryApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [],
+      emptyState: {
+        title: "Gallery coming soon",
+        message: "Curated groups have not been configured yet."
+      }
+    });
+  });
+
+  test("GET /api/gallery serves only SQLite works that actually have hydrated images", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const csvPath = path.join(tempDir, "gallery-hydrated.csv");
+
+    writeFileSync(
+      csvPath,
+      "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain,Primary Image Small\n" +
+        "1,European Paintings,No Image Work,Artist One,1900,Painting,Oil on canvas,True,\n" +
+        "2,European Paintings,Hydrated Work 2,Artist Two,1901,Painting,Oil on canvas,True,https://images.metmuseum.org/small/2.jpg\n" +
+        "3,European Paintings,Hydrated Work 3,Artist Three,1902,Painting,Oil on canvas,True,https://images.metmuseum.org/small/3.jpg\n",
+      "utf8"
+    );
+
+    expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+
+    const galleryApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    expect(
+      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 2 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 3 } }))
+        .statusCode
+    ).toBe(201);
+    const response = await makeRequest("/api/gallery", galleryApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [
+        {
+          objectId: 2,
+          title: "Hydrated Work 2",
+          artist: "Artist Two",
+          imageUrl: "https://images.metmuseum.org/small/2.jpg"
+        },
+        {
+          objectId: 3,
+          title: "Hydrated Work 3",
+          artist: "Artist Three",
+          imageUrl: "https://images.metmuseum.org/small/3.jpg"
+        }
+      ]
+    });
+  });
+
+  test("PATCH /api/admin/curated-groups/:slug/feature switches the homepage gallery to that curated group", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const csvPath = path.join(tempDir, "gallery-featured-group.csv");
+
+    writeFileSync(
+      csvPath,
+      "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain,Primary Image Small\n" +
+        "1,European Paintings,Homepage Work,Artist One,1900,Painting,Oil on canvas,True,https://images.metmuseum.org/small/1.jpg\n" +
+        "2,European Paintings,Featured Work 2,Artist Two,1901,Painting,Oil on canvas,True,https://images.metmuseum.org/small/2.jpg\n" +
+        "3,European Paintings,Featured Work 3,Artist Three,1902,Painting,Oil on canvas,True,https://images.metmuseum.org/small/3.jpg\n",
+      "utf8"
+    );
+
+    expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    expect(
+      (
+        await makeRequest("/api/admin/curated-groups", adminApp, {
+          method: "POST",
+          body: { slug: "featured-landscapes", name: "Featured Landscapes" }
+        })
+      ).statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 1 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (
+        await makeRequest("/api/admin/gallery", adminApp, {
+          method: "POST",
+          body: { objectId: 2, groupSlug: "featured-landscapes" }
+        })
+      ).statusCode
+    ).toBe(201);
+    expect(
+      (
+        await makeRequest("/api/admin/gallery", adminApp, {
+          method: "POST",
+          body: { objectId: 3, groupSlug: "featured-landscapes" }
+        })
+      ).statusCode
+    ).toBe(201);
+
+    const featureResponse = await makeRequest(
+      "/api/admin/curated-groups/featured-landscapes/feature",
+      adminApp,
+      { method: "PATCH" }
+    );
+
+    expect(featureResponse.statusCode).toBe(200);
+    expect(JSON.parse(featureResponse._getData())).toEqual({
+      ok: true,
+      group: {
+        slug: "featured-landscapes",
+        name: "Featured Landscapes",
+        objectCount: 2,
+        isHomepageFeatured: true
+      }
+    });
+
+    const galleryResponse = await makeRequest("/api/gallery", adminApp);
+    expect(JSON.parse(galleryResponse._getData())).toEqual({
+      results: [
+        {
+          objectId: 2,
+          title: "Featured Work 2",
+          artist: "Artist Two",
+          imageUrl: "https://images.metmuseum.org/small/2.jpg"
+        },
+        {
+          objectId: 3,
+          title: "Featured Work 3",
+          artist: "Artist Three",
+          imageUrl: "https://images.metmuseum.org/small/3.jpg"
+        }
+      ]
+    });
+  });
+
+  test("GET /api/admin/gallery lists curated gallery entries from a configured SQLite database path", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/admin/gallery", adminApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: []
+    });
+  });
+
+  test("GET /api/admin/curated-groups lists the default homepage editorial group", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/admin/curated-groups", adminApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [
+        {
+          slug: "homepage",
+          name: "Homepage Gallery",
+          objectCount: 0,
+          isHomepageFeatured: true
+        }
+      ]
+    });
+  });
+
+  test("GET /api/admin/curated-groups recreates missing curated group tables for a legacy SQLite catalog", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const database = new DatabaseSync(databasePath);
+    database.exec("DROP TABLE curated_group_objects");
+    database.exec("DROP TABLE curated_groups");
+    database.close();
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/admin/curated-groups", adminApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [
+        {
+          slug: "homepage",
+          name: "Homepage Gallery",
+          objectCount: 0,
+          isHomepageFeatured: true
+        }
+      ]
+    });
+  });
+
+  test("POST /api/admin/curated-groups creates a new editorial group", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/admin/curated-groups", adminApp, {
+      method: "POST",
+      body: { slug: "featured-landscapes", name: "Featured Landscapes" }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true,
+      group: {
+        slug: "featured-landscapes",
+        name: "Featured Landscapes",
+        objectCount: 0,
+        isHomepageFeatured: false
+      }
+    });
+
+    const listResponse = await makeRequest("/api/admin/curated-groups", adminApp);
+
+    expect(JSON.parse(listResponse._getData())).toEqual({
+      results: [
+        {
+          slug: "featured-landscapes",
+          name: "Featured Landscapes",
+          objectCount: 0,
+          isHomepageFeatured: false
+        },
+        {
+          slug: "homepage",
+          name: "Homepage Gallery",
+          objectCount: 0,
+          isHomepageFeatured: true
+        }
+      ]
+    });
+  });
+
+  test("POST /api/admin/curated-groups rejects a duplicate group name", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+
+    expect(
+      (
+        await makeRequest("/api/admin/curated-groups", adminApp, {
+          method: "POST",
+          body: { slug: "featured-landscapes", name: "Featured Landscapes" }
+        })
+      ).statusCode
+    ).toBe(201);
+
+    const response = await makeRequest("/api/admin/curated-groups", adminApp, {
+      method: "POST",
+      body: { slug: "featured-prints", name: "Featured Landscapes" }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Curated group name already exists."
+    });
+  });
+
+  test("POST /api/admin/gallery can add an object to a selected curated group", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+
+    expect(
+      (
+        await makeRequest("/api/admin/curated-groups", adminApp, {
+          method: "POST",
+          body: { slug: "featured-landscapes", name: "Featured Landscapes" }
+        })
+      ).statusCode
+    ).toBe(201);
+
+    const response = await makeRequest("/api/admin/gallery", adminApp, {
+      method: "POST",
+      body: { objectId: 4926, groupSlug: "featured-landscapes" }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true,
+      item: {
+        objectId: 4926,
+        position: 1,
+        title: "Mantel",
+        artist: "Unknown",
+        imageUrl: "",
+        hydrationStatus: "pending"
+      }
+    });
+
+    const featuredResponse = await makeRequest(
+      "/api/admin/gallery?groupSlug=featured-landscapes",
+      adminApp
+    );
+    expect(JSON.parse(featuredResponse._getData())).toEqual({
+      results: [
+        {
+          objectId: 4926,
+          position: 1,
+          title: "Mantel",
+          artist: "Unknown",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        }
+      ]
+    });
+
+    const homepageResponse = await makeRequest("/api/admin/gallery", adminApp);
+    expect(JSON.parse(homepageResponse._getData())).toEqual({
+      results: []
+    });
+  });
+
+  test("POST /api/admin/gallery appends a local object to the curated gallery list", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const csvPath = path.join(tempDir, "admin-gallery.csv");
+
+    writeFileSync(
+      csvPath,
+      "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain\n" +
+        Array.from({ length: 25 }, (_, index) => {
+          const objectId = index + 1;
+          return `${objectId},European Paintings,Curated Work ${objectId},Artist ${objectId},1900,Painting,Oil on canvas,True`;
+        }).join("\n") +
+        "\n",
+      "utf8"
+    );
+
+    expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/admin/gallery", adminApp, {
+      method: "POST",
+      body: { objectId: 25 }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true,
+      item: {
+        objectId: 25,
+        position: 1,
+        title: "Curated Work 25",
+        artist: "Artist 25",
+        imageUrl: "",
+        hydrationStatus: "pending"
+      }
+    });
+
+    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+
+    expect(JSON.parse(listResponse._getData()).results.at(-1)).toEqual({
+      objectId: 25,
+      position: 1,
+      title: "Curated Work 25",
+      artist: "Artist 25",
+      imageUrl: "",
+      hydrationStatus: "pending"
+    });
+  });
+
+  test("DELETE /api/admin/gallery/:objectId removes a curated item and compacts later positions", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+        .statusCode
+    ).toBe(201);
+    const response = await makeRequest("/api/admin/gallery/4926", adminApp, {
+      method: "DELETE"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true
+    });
+
+    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+
+    expect(JSON.parse(listResponse._getData())).toEqual({
+      results: [
+        {
+          objectId: 5046,
+          position: 1,
+          title: 'The "Shipwreck Medal"',
+          artist: "Salathiel Ellis",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        }
+      ]
+    });
+  });
+
+  test("PATCH /api/admin/gallery/reorder moves a curated item before the drop target", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+        .statusCode
+    ).toBe(201);
+    const response = await makeRequest("/api/admin/gallery/reorder", adminApp, {
+      method: "PATCH",
+      body: {
+        objectId: 5046,
+        targetObjectId: 4926
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true,
+      results: [
+        {
+          objectId: 5046,
+          position: 1,
+          title: 'The "Shipwreck Medal"',
+          artist: "Salathiel Ellis",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        },
+        {
+          objectId: 4926,
+          position: 2,
+          title: "Mantel",
+          artist: "Unknown",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        }
+      ]
+    });
+
+    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+
+    expect(JSON.parse(listResponse._getData())).toEqual({
+      results: [
+        {
+          objectId: 5046,
+          position: 1,
+          title: 'The "Shipwreck Medal"',
+          artist: "Salathiel Ellis",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        },
+        {
+          objectId: 4926,
+          position: 2,
+          title: "Mantel",
+          artist: "Unknown",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        }
+      ]
+    });
+  });
+
+  test("POST /api/admin/gallery/:objectId/hydrate hydrates a curated item and returns its updated card", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: vi.fn(async (url) => {
+        expect(String(url)).toBe(
+          "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
+        );
+
+        return createJsonResponse({
+          primaryImage: "https://images.metmuseum.org/primary/5046.jpg",
+          primaryImageSmall: "https://images.metmuseum.org/small/5046.jpg"
+        });
+      })
+    });
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+        .statusCode
+    ).toBe(201);
+    const response = await makeRequest("/api/admin/gallery/5046/hydrate", adminApp, {
+      method: "POST"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true,
+      item: {
+        objectId: 5046,
+        position: 2,
+        title: 'The "Shipwreck Medal"',
+        artist: "Salathiel Ellis",
+        imageUrl: "https://images.metmuseum.org/small/5046.jpg",
+        hydrationStatus: "hydrated"
+      }
+    });
+
+    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+
+    expect(JSON.parse(listResponse._getData()).results[1]).toEqual({
+      objectId: 5046,
+      position: 2,
+      title: 'The "Shipwreck Medal"',
+      artist: "Salathiel Ellis",
+      imageUrl: "https://images.metmuseum.org/small/5046.jpg",
+      hydrationStatus: "hydrated"
+    });
+  });
+
+  test("GET /api/gallery serves hydrated curated entries in curated order", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const csvPath = path.join(tempDir, "gallery-curated-order.csv");
+
+    writeFileSync(
+      csvPath,
+      "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain\n" +
+        "1,European Paintings,Curated Work 1,Artist 1,1900,Painting,Oil on canvas,True\n" +
+        "2,European Paintings,Curated Work 2,Artist 2,1901,Painting,Oil on canvas,True\n" +
+        "3,European Paintings,Curated Work 3,Artist 3,1902,Painting,Oil on canvas,True\n",
+      "utf8"
+    );
+
+    expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+
+    const galleryApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: vi.fn(async (url) => {
+        const objectId = Number.parseInt(String(url).split("/").at(-1) ?? "", 10);
+
+        return createJsonResponse({
+          primaryImage: `https://images.metmuseum.org/primary/${objectId}.jpg`,
+          primaryImageSmall: `https://images.metmuseum.org/small/${objectId}.jpg`
+        });
+      })
+    });
+    expect(
+      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 1 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 2 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 3 } }))
+        .statusCode
+    ).toBe(201);
+
+    expect(
+      (await makeRequest("/api/admin/gallery/2/hydrate", galleryApp, { method: "POST" })).statusCode
+    ).toBe(200);
+    expect(
+      (await makeRequest("/api/admin/gallery/3/hydrate", galleryApp, { method: "POST" })).statusCode
+    ).toBe(200);
+    expect(
+      (
+        await makeRequest("/api/admin/gallery/reorder", galleryApp, {
+          method: "PATCH",
+          body: { objectId: 3, targetObjectId: 2 }
+        })
+      ).statusCode
+    ).toBe(200);
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [
+        {
+          objectId: 3,
+          title: "Curated Work 3",
+          artist: "Artist 3",
+          imageUrl: "https://images.metmuseum.org/small/3.jpg"
+        },
+        {
+          objectId: 2,
+          title: "Curated Work 2",
+          artist: "Artist 2",
+          imageUrl: "https://images.metmuseum.org/small/2.jpg"
+        }
+      ]
+    });
+  });
+
+  test("GET /api/search returns catalog readiness metadata for an initialized but empty SQLite database", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    initializeCatalogSqlite(databasePath);
+
+    const searchApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    const response = await makeRequest("/api/search?q=shipwreck", searchApp);
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Catalog is not initialized.",
+      scope: "catalog",
+      code: "CATALOG_NOT_INITIALIZED"
+    });
+  });
+});
+
 describe("work detail API", () => {
+  test("GET /api/works/:objectId returns 503 when the local catalog is not initialized", async () => {
+    const catalog = {
+      isReady() {
+        return false;
+      }
+    };
+    const detailApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/works/436121", detailApp);
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Catalog is not initialized.",
+      scope: "catalog",
+      code: "CATALOG_NOT_INITIALIZED"
+    });
+  });
+
+  test("GET /api/works/:objectId returns a work from the local catalog when initialized", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getWork(objectId) {
+        expect(objectId).toBe(436121);
+
+        return {
+          objectId: 436121,
+          title: "The Great Wave off Kanagawa",
+          artist: "Japanese",
+          date: "ca. 1830-32",
+          context: "Print - Polychrome woodblock print; ink and color on paper",
+          imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+          metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        };
+      }
+    };
+    const detailApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/works/436121", detailApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      objectId: 436121,
+      title: "The Great Wave off Kanagawa",
+      artist: "Japanese",
+      date: "ca. 1830-32",
+      context: "Print - Polychrome woodblock print; ink and color on paper",
+      imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+      metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+    });
+  });
+
+  test("GET /api/works/:objectId returns 404 when the local catalog does not contain the work", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getWork() {
+        return null;
+      }
+    };
+    const detailApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/works/999999", detailApp);
+
+    expect(response.statusCode).toBe(404);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Work not found."
+    });
+  });
+
   test("GET /api/works/:objectId returns a normalized ARTCTL work shape", async () => {
     const metClient = createMetApiClient({
       async fetchImpl(resource) {
@@ -101,7 +914,7 @@ describe("work detail API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const detailApp = createArtctlApp({ metClient });
+    const detailApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/works/436121", detailApp);
 
@@ -140,7 +953,7 @@ describe("work detail API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const detailApp = createArtctlApp({ metClient });
+    const detailApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/works/437984", detailApp);
 
@@ -173,7 +986,7 @@ describe("work detail API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const detailApp = createArtctlApp({ metClient });
+    const detailApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/works/486055", detailApp);
 
@@ -226,7 +1039,7 @@ describe("work detail API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const detailApp = createArtctlApp({ metClient });
+    const detailApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/works/436121", detailApp);
 
@@ -246,6 +1059,143 @@ describe("work detail API", () => {
 });
 
 describe("search API", () => {
+  test("GET /api/search returns 503 when the local catalog is not initialized", async () => {
+    const catalog = createUninitializedCatalog();
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search?q=sunflowers", searchApp);
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Catalog is not initialized.",
+      scope: "catalog",
+      code: "CATALOG_NOT_INITIALIZED"
+    });
+  });
+
+  test("GET /api/search uses explicit readiness metadata from the catalog", async () => {
+    const catalog = createUninitializedCatalog({
+      error: "Catalog import required.",
+      scope: "catalog",
+      code: "CATALOG_IMPORT_REQUIRED"
+    });
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search?q=sunflowers", searchApp);
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Catalog import required.",
+      scope: "catalog",
+      code: "CATALOG_IMPORT_REQUIRED"
+    });
+  });
+
+  test("GET /api/search returns results from the local catalog when initialized", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async searchCollection(searchState) {
+        expect(searchState).toEqual({
+          query: "sunflowers",
+          departmentId: null,
+          medium: "",
+          page: 1
+        });
+
+        return {
+          query: "sunflowers",
+          results: [
+            {
+              objectId: 436524,
+              title: "Sunflowers",
+              artist: "Vincent van Gogh",
+              date: "1887",
+              imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DP130155.jpg",
+              isPublicDomain: true,
+              hasImage: true
+            }
+          ]
+        };
+      }
+    };
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search?q=sunflowers", searchApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      query: "sunflowers",
+      results: [
+        {
+          objectId: 436524,
+          title: "Sunflowers",
+          artist: "Vincent van Gogh",
+          date: "1887",
+          imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DP130155.jpg",
+          isPublicDomain: true,
+          hasImage: true
+        }
+      ]
+    });
+  });
+
+  test("GET /api/search still rejects an empty query before consulting the local catalog", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      searchCollection: vi.fn()
+    };
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search?q=%20%20%20", searchApp);
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Query is required."
+    });
+    expect(catalog.searchCollection).not.toHaveBeenCalled();
+  });
+
+  test("GET /api/search returns catalog readiness metadata without live Met fetches through the default app path", async () => {
+    const originalFetch = global.fetch;
+    const fetchSpy = vi.fn(async (resource) => {
+      throw new Error(`Unexpected Met API request: ${String(resource)}`);
+    });
+    global.fetch = fetchSpy;
+
+    try {
+      const searchApp = createArtctlApp();
+
+      const response = await makeRequest("/api/search?q=sunflowers", searchApp);
+
+      expect(response.statusCode).toBe(503);
+      expect(JSON.parse(response._getData())).toEqual({
+        error: "Catalog is not initialized.",
+        scope: "catalog",
+        code: "CATALOG_NOT_INITIALIZED"
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test("GET /api/search returns catalog readiness metadata through the default app path", async () => {
+    const searchApp = createArtctlApp();
+
+    const response = await makeRequest("/api/search?q=sunflowers", searchApp);
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Catalog is not initialized.",
+      scope: "catalog",
+      code: "CATALOG_NOT_INITIALIZED"
+    });
+  });
+
   test("GET /api/search/departments returns Met department options", async () => {
     const metClient = createMetApiClient({
       async fetchImpl(resource) {
@@ -263,7 +1213,7 @@ describe("search API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const searchApp = createArtctlApp({ metClient });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/search/departments", searchApp);
 
@@ -273,6 +1223,51 @@ describe("search API", () => {
         { departmentId: 11, displayName: "European Paintings" },
         { departmentId: 6, displayName: "Arms and Armor" }
       ]
+    });
+  });
+
+  test("GET /api/search/departments returns department options from the local catalog when initialized", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getDepartments() {
+        return {
+          departments: [
+            { departmentId: 1, displayName: "Asian Art" },
+            { departmentId: 2, displayName: "Drawings and Prints" }
+          ]
+        };
+      }
+    };
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search/departments", searchApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      departments: [
+        { departmentId: 1, displayName: "Asian Art" },
+        { departmentId: 2, displayName: "Drawings and Prints" }
+      ]
+    });
+  });
+
+  test("GET /api/search/departments returns 503 when the local catalog is not initialized", async () => {
+    const catalog = {
+      isReady() {
+        return false;
+      }
+    };
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search/departments", searchApp);
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Catalog is not initialized.",
+      scope: "catalog",
+      code: "CATALOG_NOT_INITIALIZED"
     });
   });
 
@@ -291,7 +1286,7 @@ describe("search API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const searchApp = createArtctlApp({ metClient });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/search?q=sunflowers", searchApp);
 
@@ -322,7 +1317,7 @@ describe("search API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const searchApp = createArtctlApp({ metClient });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const firstResponse = await makeRequest("/api/search?q=sunflowers", searchApp);
     const secondResponse = await makeRequest("/api/search?q=iris", searchApp);
@@ -386,7 +1381,7 @@ describe("search API", () => {
           throw new Error(`Unexpected Met API request: ${url}`);
         }
       });
-      const searchApp = createArtctlApp({ metClient });
+      const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
       const firstResponse = await makeRequest("/api/search?q=sunflowers", searchApp);
 
@@ -463,7 +1458,7 @@ describe("search API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const searchApp = createArtctlApp({ metClient });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const firstResponse = await makeRequest("/api/search?q=van%20gogh", searchApp);
     const secondResponse = await makeRequest("/api/search?q=van%20gogh", searchApp);
@@ -528,7 +1523,7 @@ describe("search API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const searchApp = createArtctlApp({ metClient });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/search?q=wave&medium=wood", searchApp);
 
@@ -586,7 +1581,7 @@ describe("search API", () => {
         });
       }
     });
-    const searchApp = createArtctlApp({ metClient });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/search?q=works&page=1", searchApp);
     const payload = JSON.parse(response._getData());
@@ -639,7 +1634,7 @@ describe("search API", () => {
         throw new Error(`Unexpected Met API request: ${url}`);
       }
     });
-    const searchApp = createArtctlApp({ metClient });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/search?q=van%20gogh", searchApp);
 
@@ -671,6 +1666,59 @@ describe("search API", () => {
 });
 
 describe("gallery API", () => {
+  test("GET /api/gallery returns 503 when the local catalog is not initialized", async () => {
+    const catalog = {
+      isReady() {
+        return false;
+      }
+    };
+    const galleryApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+
+    expect(response.statusCode).toBe(503);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Catalog is not initialized.",
+      scope: "catalog",
+      code: "CATALOG_NOT_INITIALIZED"
+    });
+  });
+
+  test("GET /api/gallery returns results from the local catalog when initialized", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getGalleryPage() {
+        return {
+          results: [
+            {
+              artist: "Vincent van Gogh",
+              artistSlug: "vincent-van-gogh",
+              imageUrl: "https://images.example.test/gallery/van-gogh.jpg",
+              workCount: 12
+            }
+          ]
+        };
+      }
+    };
+    const galleryApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [
+        {
+          artist: "Vincent van Gogh",
+          artistSlug: "vincent-van-gogh",
+          imageUrl: "https://images.example.test/gallery/van-gogh.jpg",
+          workCount: 12
+        }
+      ]
+    });
+  });
+
   test("Met-backed routes share cooldown metadata after a detected Met challenge", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-05-09T00:00:00.000Z"));
@@ -710,7 +1758,7 @@ describe("gallery API", () => {
           throw new Error(`Unexpected Met API request: ${url}`);
         }
       });
-      const metApp = createArtctlApp({ metClient });
+      const metApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
       const galleryResponse = await makeRequest("/api/gallery", metApp);
       vi.setSystemTime(new Date("2026-05-09T00:00:00.500Z"));
@@ -793,7 +1841,7 @@ describe("gallery API", () => {
           throw new Error(`Unexpected Met API request: ${url}`);
         }
       });
-      const metApp = createArtctlApp({ metClient });
+      const metApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
       const galleryResponse = await makeRequest("/api/gallery", metApp);
 
@@ -862,7 +1910,7 @@ describe("gallery API", () => {
         });
       }
     });
-    const galleryApp = createArtctlApp({ metClient });
+    const galleryApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/gallery", galleryApp);
     const searchRequest = new URL(requests[0]);
@@ -880,6 +1928,205 @@ describe("gallery API", () => {
       imageUrl: "https://images.metmuseum.org/CRDImages/test/web-large/475.jpg"
     });
     expect(JSON.parse(response._getData()).results.at(-1).objectId).toBe(500);
+  });
+
+  test("GET /api/gallery serves curated local gallery results without live Met fetches", async () => {
+    const fetchSpy = vi.fn(async (resource) => {
+      throw new Error(`Unexpected Met API request: ${String(resource)}`);
+    });
+    const metClient = createMetApiClient({
+      fetchImpl: fetchSpy,
+      curatedGalleryRecords: [
+        {
+          objectID: 436121,
+          title: "The Great Wave off Kanagawa",
+          artistDisplayName: "",
+          culture: "Japanese",
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+        }
+      ]
+    });
+    const galleryApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [
+        {
+          artist: "Japanese",
+          artistSlug: "japanese",
+          imageUrl: "https://collectionapi.metmuseum.org/api/collection/v1/iiif/436121/preview",
+          workCount: 1
+        }
+      ]
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("GET /api/gallery returns catalog readiness metadata through the default app path", async () => {
+    const originalFetch = global.fetch;
+    const fetchSpy = vi.fn(async (resource) => {
+      throw new Error(`Unexpected Met API request: ${String(resource)}`);
+    });
+    global.fetch = fetchSpy;
+
+    try {
+      const galleryApp = createArtctlApp();
+
+      const response = await makeRequest("/api/gallery", galleryApp);
+
+      expect(response.statusCode).toBe(503);
+      expect(JSON.parse(response._getData())).toEqual({
+        error: "Catalog is not initialized.",
+        scope: "catalog",
+        code: "CATALOG_NOT_INITIALIZED"
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
+  test("GET /api/gallery skips invalid curated local records while preserving valid results", async () => {
+    const fetchSpy = vi.fn(async (resource) => {
+      throw new Error(`Unexpected Met API request: ${String(resource)}`);
+    });
+    const metClient = createMetApiClient({
+      fetchImpl: fetchSpy,
+      curatedGalleryRecords: [
+        {
+          objectID: 436121,
+          title: "The Great Wave off Kanagawa",
+          artistDisplayName: "",
+          culture: "Japanese",
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+        },
+        {
+          objectID: 999001,
+          title: "",
+          artistDisplayName: "Unknown",
+          culture: "",
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/test/web-large/999001.jpg"
+        },
+        {
+          objectID: 999002,
+          title: "Hidden Work",
+          artistDisplayName: "Unknown",
+          culture: "",
+          isPublicDomain: false,
+          primaryImage: "",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/test/web-large/999002.jpg"
+        },
+        {
+          objectID: 999003,
+          title: "No Image Work",
+          artistDisplayName: "Unknown",
+          culture: "",
+          isPublicDomain: true,
+          primaryImage: "",
+          primaryImageSmall: ""
+        }
+      ]
+    });
+    const galleryApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      results: [
+        {
+          artist: "Japanese",
+          artistSlug: "japanese",
+          imageUrl: "https://collectionapi.metmuseum.org/api/collection/v1/iiif/436121/preview",
+          workCount: 1
+        }
+      ]
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("GET /api/gallery limits curated local results to 12 deterministic artist summaries", async () => {
+    const fetchSpy = vi.fn(async (resource) => {
+      throw new Error(`Unexpected Met API request: ${String(resource)}`);
+    });
+    const curatedGalleryRecords = Array.from({ length: 26 }, (_, index) => {
+      const objectId = 700000 + index;
+
+      return {
+        objectID: objectId,
+        title: `Curated Work ${objectId}`,
+        artistDisplayName: `Artist ${objectId}`,
+        culture: "",
+        isPublicDomain: true,
+        primaryImage: "",
+        primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`
+      };
+    });
+    const metClient = createMetApiClient({
+      fetchImpl: fetchSpy,
+      curatedGalleryRecords
+    });
+    const galleryApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
+
+    const response = await makeRequest("/api/gallery", galleryApp);
+    const payload = JSON.parse(response._getData());
+
+    expect(response.statusCode).toBe(200);
+    expect(payload.results).toHaveLength(12);
+    expect(payload.results[0]).toEqual({
+      artist: "Artist 700000",
+      artistSlug: "artist-700000",
+      imageUrl: "https://collectionapi.metmuseum.org/api/collection/v1/iiif/700000/preview",
+      workCount: 1
+    });
+    expect(payload.results.at(-1)).toEqual({
+      artist: "Artist 700011",
+      artistSlug: "artist-700011",
+      imageUrl: "https://collectionapi.metmuseum.org/api/collection/v1/iiif/700011/preview",
+      workCount: 1
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("GET /api/artists/:artistSlug returns the curated 50-work gallery for that artist", async () => {
+    const originalFetch = global.fetch;
+    const fetchSpy = vi.fn(async (resource) => {
+      throw new Error(`Unexpected Met API request: ${String(resource)}`);
+    });
+    global.fetch = fetchSpy;
+
+    try {
+      const galleryApp = createArtctlApp();
+
+      const response = await makeRequest("/api/artists/vincent-van-gogh", galleryApp);
+      const payload = JSON.parse(response._getData());
+
+      expect(response.statusCode).toBe(200);
+      expect(payload.results).toHaveLength(50);
+      expect(payload.results[0]).toEqual({
+        objectId: 436524,
+        title: "Sunflowers",
+        artist: "Vincent van Gogh",
+        imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DP-41223-001.jpg"
+      });
+      expect(payload.results.at(-1)).toEqual({
+        objectId: 500049,
+        title: "Curated Van Gogh Work 50",
+        artist: "Vincent van Gogh",
+        imageUrl: "https://images.metmuseum.org/CRDImages/seed/web-large/vincent-van-gogh-500049.jpg"
+      });
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   test("GET /api/gallery skips individual object fetch failures while building the first batch", async () => {
@@ -912,7 +2159,7 @@ describe("gallery API", () => {
         });
       }
     });
-    const galleryApp = createArtctlApp({ metClient });
+    const galleryApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/gallery", galleryApp);
     const results = JSON.parse(response._getData()).results;
@@ -963,7 +2210,7 @@ describe("gallery API", () => {
         });
       }
     });
-    const galleryApp = createArtctlApp({ metClient });
+    const galleryApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const response = await makeRequest("/api/gallery", galleryApp);
     const objectRequestCookies = requests
@@ -1021,7 +2268,7 @@ describe("gallery API", () => {
         });
       }
     });
-    const galleryApp = createArtctlApp({ metClient });
+    const galleryApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
     const firstResponse = await makeRequest("/api/gallery", galleryApp);
     const secondResponse = await makeRequest("/api/gallery", galleryApp);
