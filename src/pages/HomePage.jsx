@@ -16,7 +16,7 @@ function GalleryCard({ item }) {
   return (
     <li
       key={key}
-      className="gallery-card overflow-hidden border border-border bg-card transition-colors hover:border-primary focus-within:border-primary"
+      className="gallery-card overflow-hidden border border-solid border-border bg-card transition-colors hover:border-primary focus-within:border-primary active:border-primary"
     >
       <Link className="block h-full" to={href}>
         <figure className="gallery-card-media m-0 bg-secondary">

@@ -4,6 +4,7 @@ import express from "express";
 import { createMetApiClient } from "./met-api.js";
 import { MetHydrationAbortError, runCatalogHydration } from "./catalog-hydrate.js";
 import { createRuntimeCatalog, createUninitializedCatalog } from "./catalog.js";
+import { getObjectHydrationState } from "./catalog-sqlite.js";
 import { loadCuratedArtistIndex } from "./curated-gallery.js";
 import { curatedGalleryRecords } from "./curated-gallery-records.js";
 
@@ -515,6 +516,31 @@ export function createArtctlApp(options = {}) {
     }
 
     if (catalog?.getWork) {
+      if (catalogDatabasePath) {
+        const hydrationState = getObjectHydrationState({ databasePath: catalogDatabasePath, objectId });
+
+        if (
+          hydrationState?.hydrationStatus === "pending" &&
+          !hydrationState.primaryImage &&
+          !hydrationState.primaryImageSmall
+        ) {
+          try {
+            await runCatalogHydration({
+              databasePath: catalogDatabasePath,
+              limit: 1,
+              objectIds: [objectId],
+              fetchImpl: hydrationFetchImpl,
+              sleepImpl: hydrationSleepImpl,
+              randomImpl: hydrationRandomImpl
+            });
+          } catch (error) {
+            if (!(error instanceof MetHydrationAbortError)) {
+              throw error;
+            }
+          }
+        }
+      }
+
       const work = await catalog.getWork(objectId);
 
       if (!work) {

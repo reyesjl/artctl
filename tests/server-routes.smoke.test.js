@@ -8,7 +8,7 @@ import httpMocks from "node-mocks-http";
 import { createArtctlApp } from "../server/app.js";
 import { createUninitializedCatalog } from "../server/catalog.js";
 import { runCatalogImport } from "../server/catalog-import.js";
-import { initializeCatalogSqlite } from "../server/catalog-sqlite.js";
+import { getObjectHydrationState, initializeCatalogSqlite } from "../server/catalog-sqlite.js";
 import { createMetApiClient } from "../server/met-api.js";
 import { createTrackedTempDir } from "./temp-dir.js";
 
@@ -999,6 +999,183 @@ describe("work detail API", () => {
       context: "Color woodcut - Ink and color on paper",
       imageUrl: "",
       metUrl: "https://www.metmuseum.org/art/collection/search/486055"
+    });
+  });
+
+  test("GET /api/works/:objectId hydrates a pending local catalog work on demand and persists the updated detail", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-detail-hydration-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const hydrationRequests = [];
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: async (resource) => {
+        hydrationRequests.push(String(resource));
+
+        return createJsonResponse({
+          objectID: 5046,
+          primaryImage: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/aw/web-large/DT5046.jpg"
+        });
+      }
+    });
+
+    const firstResponse = await makeRequest("/api/works/5046", detailApp);
+    const secondResponse = await makeRequest("/api/works/5046", detailApp);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(JSON.parse(firstResponse._getData())).toEqual({
+      objectId: 5046,
+      title: 'The "Shipwreck Medal"',
+      artist: "Salathiel Ellis",
+      date: "1845–57",
+      context: "Medal - Bronze",
+      imageUrl: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
+      metUrl: "http://www.metmuseum.org/art/collection/search/5046"
+    });
+    expect(secondResponse.statusCode).toBe(200);
+    expect(JSON.parse(secondResponse._getData()).imageUrl).toBe(
+      "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg"
+    );
+    expect(hydrationRequests).toEqual([
+      "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
+    ]);
+    expect(getObjectHydrationState({ databasePath, objectId: 5046 })).toMatchObject({
+      hydrationStatus: "hydrated",
+      hydrationError: "",
+      primaryImage: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
+      primaryImageSmall: "https://images.metmuseum.org/CRDImages/aw/web-large/DT5046.jpg"
+    });
+  });
+
+  test("GET /api/works/:objectId records a no_image hydration outcome and still returns local metadata", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-detail-hydration-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const hydrationRequests = [];
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: async (resource) => {
+        hydrationRequests.push(String(resource));
+
+        return createJsonResponse({
+          objectID: 5046,
+          primaryImage: "",
+          primaryImageSmall: ""
+        });
+      }
+    });
+
+    const firstResponse = await makeRequest("/api/works/5046", detailApp);
+    const secondResponse = await makeRequest("/api/works/5046", detailApp);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(JSON.parse(firstResponse._getData()).imageUrl).toBe("");
+    expect(secondResponse.statusCode).toBe(200);
+    expect(JSON.parse(secondResponse._getData()).imageUrl).toBe("");
+    expect(hydrationRequests).toEqual([
+      "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
+    ]);
+    expect(getObjectHydrationState({ databasePath, objectId: 5046 })).toMatchObject({
+      hydrationStatus: "no_image",
+      hydrationError: "",
+      primaryImage: "",
+      primaryImageSmall: ""
+    });
+  });
+
+  test("GET /api/works/:objectId records a failed hydration outcome and still returns local metadata", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-detail-hydration-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const hydrationRequests = [];
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: async (resource) => {
+        hydrationRequests.push(String(resource));
+
+        return createTextResponse("not found", { status: 404 });
+      }
+    });
+
+    const firstResponse = await makeRequest("/api/works/5046", detailApp);
+    const secondResponse = await makeRequest("/api/works/5046", detailApp);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(JSON.parse(firstResponse._getData()).imageUrl).toBe("");
+    expect(secondResponse.statusCode).toBe(200);
+    expect(JSON.parse(secondResponse._getData()).imageUrl).toBe("");
+    expect(hydrationRequests).toEqual([
+      "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
+    ]);
+    expect(getObjectHydrationState({ databasePath, objectId: 5046 })).toMatchObject({
+      hydrationStatus: "failed",
+      hydrationError: "http_404",
+      primaryImage: "",
+      primaryImageSmall: ""
+    });
+  });
+
+  test("GET /api/works/:objectId records a retry hydration outcome and still returns local metadata", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-detail-hydration-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const hydrationRequests = [];
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: async (resource) => {
+        hydrationRequests.push(String(resource));
+
+        return createTextResponse("<html>challenge</html>", {
+          status: 403,
+          contentType: "text/html"
+        });
+      }
+    });
+
+    const firstResponse = await makeRequest("/api/works/5046", detailApp);
+    const secondResponse = await makeRequest("/api/works/5046", detailApp);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(JSON.parse(firstResponse._getData()).imageUrl).toBe("");
+    expect(secondResponse.statusCode).toBe(200);
+    expect(JSON.parse(secondResponse._getData()).imageUrl).toBe("");
+    expect(hydrationRequests).toEqual([
+      "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
+    ]);
+    expect(getObjectHydrationState({ databasePath, objectId: 5046 })).toMatchObject({
+      hydrationStatus: "retry",
+      hydrationError: "http_403",
+      primaryImage: "",
+      primaryImageSmall: ""
     });
   });
 

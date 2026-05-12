@@ -1288,7 +1288,12 @@ test("homepage renders gallery cards as themed surfaces while preserving links a
 
   expect(card).not.toBeNull();
   expect(card).toHaveClass("bg-card");
+  expect(card).toHaveClass("border");
+  expect(card).toHaveClass("border-solid");
   expect(card).toHaveClass("border-border");
+  expect(card).toHaveClass("hover:border-primary");
+  expect(card).toHaveClass("focus-within:border-primary");
+  expect(card).toHaveClass("active:border-primary");
   expect(cardLink).toHaveAttribute("href", "/works/436524");
   expect(title).toHaveClass("text-foreground");
   expect(meta).toHaveClass("text-muted-foreground");

@@ -1061,3 +1061,25 @@ export function updateObjectHydration({
       );
   });
 }
+
+export function getObjectHydrationState({ databasePath, objectId }) {
+  return withDatabase(databasePath, (database) => {
+    const row = database
+      .prepare(
+        `
+          SELECT
+            object_id AS objectId,
+            primary_image AS primaryImage,
+            primary_image_small AS primaryImageSmall,
+            hydration_status AS hydrationStatus,
+            hydration_error AS hydrationError,
+            hydrated_at AS hydratedAt
+          FROM objects
+          WHERE object_id = ?
+        `
+      )
+      .get(objectId);
+
+    return row ?? null;
+  });
+}
