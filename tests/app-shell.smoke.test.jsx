@@ -367,6 +367,10 @@ test("curated groups route can feature a group on the homepage", async () => {
   await waitFor(() => {
     expect(requests).toContain("PATCH /api/admin/curated-groups/featured-landscapes/feature");
   });
+  expect(screen.getByRole("link", { name: "Featured Landscapes" })).toHaveClass("text-primary");
+  expect(screen.queryByText("Featured on homepage")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Feature Featured Landscapes" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Feature Homepage Gallery" })).toBeInTheDocument();
 
   cleanup();
   window.history.pushState({}, "", "/");
@@ -1957,6 +1961,99 @@ test("work viewer renders the preferred image and compact metadata with a Met li
   );
 });
 
+test("direct entry to an image-backed work route shows inspection controls", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Reset view" })).toBeInTheDocument();
+});
+
+test("work viewer zoom controls change the artwork presentation and reset to the default view", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  expect(image).toHaveStyle({
+    transform: "translate(0px, 0px) scale(1)"
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+  expect(image).toHaveStyle({
+    transform: "translate(0px, 0px) scale(1.5)"
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Reset view" }));
+
+  expect(image).toHaveStyle({
+    transform: "translate(0px, 0px) scale(1)"
+  });
+});
+
+test("dragging a zoomed work image pans it without displacing the metadata panel", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  fireEvent.mouseDown(image, { clientX: 40, clientY: 50 });
+  fireEvent.mouseMove(image, { clientX: 68, clientY: 74 });
+  fireEvent.mouseUp(image);
+
+  expect(image).toHaveStyle({
+    transform: "translate(28px, 24px) scale(1.5)"
+  });
+  expect(screen.getByLabelText("Work metadata")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View on the Met" })).toBeInTheDocument();
+});
+
 test("work viewer renders a themed layout and metadata panel while preserving work details", async () => {
   const metClient = {
     async getWork(objectId) {
@@ -2041,6 +2138,9 @@ test("work viewer shows a themed unavailable-image state while preserving metada
   expect(unavailable).toHaveClass("text-muted-foreground");
   expect(unavailable).toHaveClass("text-center");
   expect(screen.queryByRole("img", { name: "Galisteo Creek" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Reset view" })).not.toBeInTheDocument();
   expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
 });
 

@@ -95,10 +95,13 @@ export function CuratedGroupsPage({ apiBaseUrl = "", fetchImpl = fetch }) {
         <div className="grid gap-1">
           {groups.map((group) => (
             <div key={group.slug} className="flex items-center gap-3">
-              <Link to={`/admin/curated-groups/${group.slug}`}>{group.name}</Link>
-              {group.isHomepageFeatured ? (
-                <span>Featured on homepage</span>
-              ) : (
+              <Link
+                className={group.isHomepageFeatured ? "text-primary" : undefined}
+                to={`/admin/curated-groups/${group.slug}`}
+              >
+                {group.name}
+              </Link>
+              {group.isHomepageFeatured ? null : (
                 <button
                   aria-label={`Feature ${group.name}`}
                   className="text-action"
