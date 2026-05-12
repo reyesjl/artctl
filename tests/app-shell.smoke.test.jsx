@@ -163,9 +163,10 @@ test("homepage uses a wider route frame than standard pages", async () => {
 
   render(<App fetchImpl={fetchImpl} />);
 
-  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(await screen.findByText(">type search")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   const searchMain = screen.getByRole("main");
-  expect(searchMain.className).toContain("max-w-[896px]");
+  expect(searchMain.className).toContain("max-w-7xl");
 });
 
 test("work route uses the wider route frame", async () => {
@@ -178,7 +179,6 @@ test("work route uses the wider route frame", async () => {
 });
 
 test.each([
-  { route: "/search", heading: "Search" },
   { route: "/works/42", heading: "Work 42" },
   { route: "/admin", heading: "Admin" },
   { route: "/admin/curated-groups", heading: "Curated Groups" },
@@ -193,6 +193,21 @@ test.each([
 
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
+});
+
+test("search route renders its terminal shell inside the shared app shell", async () => {
+  window.history.pushState({}, "", "/search");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
+  expect(await screen.findByText(">type search")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
@@ -784,18 +799,191 @@ test("search route keeps its content on the shared shell background", async () =
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const heading = await screen.findByRole("heading", { name: "Search" });
-  const routeFrame = heading.closest("section");
+  await screen.findByText(">type search");
+  const queryInput = screen.getByPlaceholderText("artist, title, culture, medium...");
+  const searchShell = queryInput.closest(".search-shell");
+  const searchForm = queryInput.closest("form");
 
-  expect(heading.tagName).toBe("DIV");
-  expect(heading).toHaveAttribute("aria-level", "1");
-  expect(heading).toHaveClass("m-0");
-  expect(routeFrame).not.toBeNull();
-  expect(routeFrame).toContainElement(screen.getByLabelText("Query"));
-  expect(routeFrame).not.toHaveClass("bg-card");
-  expect(routeFrame).not.toHaveClass("border-border");
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
+  expect(queryInput).not.toBeNull();
+  expect(screen.getByText(">type search")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[departments]" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[media]" })).toBeInTheDocument();
+  expect(searchShell).toHaveClass("border");
+  expect(searchShell).toHaveClass("border-solid");
+  expect(searchShell).toHaveClass("border-border");
+  expect(searchShell).toHaveClass("divide-y");
+  expect(searchShell).toHaveClass("divide-border");
+  expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByText("v0.1.0")).toBeInTheDocument();
+});
+
+test("search route reveals terminal-style department and media pickers from the action strip", async () => {
+  window.history.pushState({}, "", "/search");
+
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: [
+          { departmentId: 11, displayName: "European Paintings" },
+          { departmentId: 6, displayName: "Arms and Armor" }
+        ]
+      };
+    },
+    async searchCollection(query) {
+      return { query, results: [] };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const departmentsButton = await screen.findByRole("button", { name: "[departments]" });
+  const mediaButton = screen.getByRole("button", { name: "[media]" });
+  const searchButton = screen.getByRole("button", { name: "[search]" });
+  const actionsRow = departmentsButton.closest(".flex");
+
+  expect(actionsRow).toContainElement(mediaButton);
+  expect(actionsRow).toContainElement(searchButton);
+
+  fireEvent.click(departmentsButton);
+  const europeanPaintings = await screen.findByRole("button", { name: "[european paintings]" });
+  const departmentsPopover = europeanPaintings.closest("[data-search-filter-popover='departments']");
+  expect(europeanPaintings).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[arms and armor]" })).toBeInTheDocument();
+  expect(departmentsPopover).toBeInTheDocument();
+  expect(departmentsPopover).toHaveClass("max-h-56");
+  expect(departmentsPopover).toHaveClass("overflow-y-auto");
+  expect(departmentsPopover).toHaveClass("w-max");
+  expect(departmentsButton).toHaveClass("text-primary");
+  fireEvent.click(europeanPaintings);
+  expect(screen.queryByRole("button", { name: "[european paintings]" })).not.toBeInTheDocument();
+  expect(departmentsButton).not.toHaveClass("text-primary");
+
+  fireEvent.click(mediaButton);
+  const paintings = screen.getByRole("button", { name: "[paintings]" });
+  const mediaPopover = paintings.closest("[data-search-filter-popover='media']");
+  expect(paintings).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[oil]" })).toBeInTheDocument();
+  expect(mediaPopover).toBeInTheDocument();
+  expect(mediaPopover).toHaveClass("max-h-56");
+  expect(mediaPopover).toHaveClass("overflow-y-auto");
+  expect(mediaPopover).toHaveClass("w-max");
+  expect(mediaButton).toHaveClass("text-primary");
+  fireEvent.click(paintings);
+  expect(screen.queryByRole("button", { name: "[paintings]" })).not.toBeInTheDocument();
+  expect(mediaButton).not.toHaveClass("text-primary");
+
+  fireEvent.click(mediaButton);
+  await screen.findByRole("button", { name: "[paintings]" });
+  fireEvent.mouseDown(document.body);
+
+  expect(screen.queryByRole("button", { name: "[paintings]" })).not.toBeInTheDocument();
+  expect(mediaButton).not.toHaveClass("text-primary");
+});
+
+test("search route applies active styling to the selected department and media filters", async () => {
+  window.history.pushState({}, "", "/search");
+
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: [
+          { departmentId: 11, displayName: "European Paintings" },
+          { departmentId: 6, displayName: "Arms and Armor" }
+        ]
+      };
+    },
+    async searchCollection(query) {
+      return { query, results: [] };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "[departments]" }));
+  const europeanPaintings = await screen.findByRole("button", { name: "[european paintings]" });
+  const armsAndArmor = screen.getByRole("button", { name: "[arms and armor]" });
+  fireEvent.click(europeanPaintings);
+  fireEvent.click(screen.getByRole("button", { name: "[departments]" }));
+  const reopenedEuropeanPaintings = await screen.findByRole("button", {
+    name: "[european paintings]"
+  });
+  const reopenedArmsAndArmor = screen.getByRole("button", { name: "[arms and armor]" });
+
+  expect(reopenedEuropeanPaintings).toHaveClass("text-primary");
+  expect(reopenedEuropeanPaintings).not.toHaveClass("bg-primary/10");
+  expect(reopenedEuropeanPaintings).toHaveClass("appearance-none");
+  expect(reopenedEuropeanPaintings).toHaveClass("bg-transparent");
+  expect(reopenedEuropeanPaintings).toHaveClass("border-0");
+  expect(reopenedEuropeanPaintings).toHaveClass("text-left");
+  expect(reopenedArmsAndArmor).not.toHaveClass("bg-primary/10");
+  expect(reopenedArmsAndArmor).not.toHaveClass("text-muted-foreground");
+  expect(reopenedArmsAndArmor).toHaveClass("appearance-none");
+  expect(reopenedArmsAndArmor).toHaveClass("bg-transparent");
+  expect(reopenedArmsAndArmor).toHaveClass("border-0");
+  expect(reopenedArmsAndArmor).toHaveClass("text-left");
+
+  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
+  const wood = screen.getByRole("button", { name: "[wood]" });
+  const oil = screen.getByRole("button", { name: "[oil]" });
+  fireEvent.click(wood);
+  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
+  const reopenedWood = await screen.findByRole("button", { name: "[wood]" });
+  const reopenedOil = screen.getByRole("button", { name: "[oil]" });
+
+  expect(reopenedWood).toHaveClass("text-primary");
+  expect(reopenedWood).not.toHaveClass("bg-primary/10");
+  expect(reopenedWood).toHaveClass("appearance-none");
+  expect(reopenedWood).toHaveClass("bg-transparent");
+  expect(reopenedWood).toHaveClass("border-0");
+  expect(reopenedWood).toHaveClass("text-left");
+  expect(reopenedOil).not.toHaveClass("bg-primary/10");
+  expect(reopenedOil).not.toHaveClass("text-muted-foreground");
+  expect(reopenedOil).toHaveClass("appearance-none");
+  expect(reopenedOil).toHaveClass("bg-transparent");
+  expect(reopenedOil).toHaveClass("border-0");
+  expect(reopenedOil).toHaveClass("text-left");
+});
+
+test("search route shows active filters and can clear them from the filter actions", async () => {
+  window.history.pushState({}, "", "/search");
+
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: [
+          { departmentId: 11, displayName: "European Paintings" },
+          { departmentId: 6, displayName: "Arms and Armor" }
+        ]
+      };
+    },
+    async searchCollection(query) {
+      return { query, results: [] };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(screen.queryByRole("button", { name: "[clear filters]" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/European Paintings|Wood/)).not.toBeInTheDocument();
+
+  fireEvent.click(await screen.findByRole("button", { name: "[departments]" }));
+  fireEvent.click(await screen.findByRole("button", { name: "[european paintings]" }));
+  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
+  fireEvent.click(screen.getByRole("button", { name: "[wood]" }));
+
+  expect(screen.getByRole("button", { name: "[clear filters]" })).toBeInTheDocument();
+  expect(screen.getByText("European Paintings · Wood")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "[clear filters]" }));
+
+  expect(screen.queryByRole("button", { name: "[clear filters]" })).not.toBeInTheDocument();
+  expect(screen.queryByText("European Paintings · Wood")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "[departments]" }));
+  expect(screen.getByRole("button", { name: "[european paintings]" })).not.toHaveClass("text-primary");
+  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
+  expect(screen.getByRole("button", { name: "[wood]" })).not.toHaveClass("text-primary");
 });
 
 test("current route marks only the active nav link", async () => {
@@ -878,7 +1066,7 @@ test("search route renders results from a configured SQLite catalog path through
     <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
   );
 
-  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
     "href",
     "/works/5046"
@@ -906,7 +1094,7 @@ test("search route supports multi-token SQLite FTS queries through the default E
     <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
   );
 
-  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
     "href",
     "/works/5046"
@@ -933,7 +1121,7 @@ test("search route applies the department filter on top of SQLite FTS results th
     <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
   );
 
-  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
     "href",
     "/works/5046"
@@ -962,7 +1150,7 @@ test("search route supports quoted phrase SQLite FTS queries through the default
     <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
   );
 
-  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(await screen.findByRole("link", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
     "href",
     "/works/5046"
@@ -989,8 +1177,8 @@ test("search route keeps quoted phrase SQLite FTS queries empty when the phrase 
     <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
   );
 
-  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
-  expect(screen.getByDisplayValue('"medal mantel"')).toBeInTheDocument();
+  expect(await screen.findByDisplayValue('"medal mantel"')).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   await waitFor(() => {
     expect(requests).toContain("/api/search?q=%22medal+mantel%22");
   });
@@ -1260,8 +1448,8 @@ test("search route shows an empty state before any query is submitted", async ()
 
   render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
 
-  expect(await screen.findByRole("heading", { name: "Search" })).toBeInTheDocument();
-  expect(screen.getByText("Enter a search to find works.")).toBeInTheDocument();
+  expect(await screen.findByText(">type search")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   await waitFor(() => {
     expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
   });
@@ -1319,26 +1507,16 @@ test("search route renders text actions while preserving current submission beha
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
   const queryInput = await screen.findByLabelText("Query");
-  const departmentSelect = await screen.findByLabelText("Department");
-  const mediumSelect = screen.getByLabelText("Medium");
+  const departmentsButton = screen.getByRole("button", { name: "[departments]" });
+  const mediaButton = screen.getByRole("button", { name: "[media]" });
   const searchButton = screen.getByRole("button", { name: "[search]" });
 
-  expect(queryInput).toHaveClass("bg-secondary");
-  expect(queryInput).toHaveClass("border-input");
   expect(queryInput).toHaveClass("text-foreground");
   expect(queryInput).toHaveClass("appearance-none");
-  expect(queryInput).toHaveClass("border-solid");
   expect(queryInput).toHaveClass("shadow-none");
-  expect(departmentSelect).toHaveClass("bg-secondary");
-  expect(departmentSelect).toHaveClass("border-input");
-  expect(departmentSelect).toHaveClass("appearance-none");
-  expect(departmentSelect).toHaveClass("border-solid");
-  expect(departmentSelect).toHaveClass("shadow-none");
-  expect(mediumSelect).toHaveClass("bg-secondary");
-  expect(mediumSelect).toHaveClass("border-input");
-  expect(mediumSelect).toHaveClass("appearance-none");
-  expect(mediumSelect).toHaveClass("border-solid");
-  expect(mediumSelect).toHaveClass("shadow-none");
+  expect(queryInput).toHaveAttribute("placeholder", "artist, title, culture, medium...");
+  expect(departmentsButton).toHaveTextContent("[departments]");
+  expect(mediaButton).toHaveTextContent("[media]");
   expect(searchButton).toHaveTextContent("[search]");
   expect(searchButton).not.toHaveClass("bg-secondary");
   expect(searchButton).not.toHaveClass("border-input");
@@ -1347,12 +1525,10 @@ test("search route renders text actions while preserving current submission beha
   fireEvent.change(queryInput, {
     target: { value: "landscape" }
   });
-  fireEvent.change(departmentSelect, {
-    target: { value: "11" }
-  });
-  fireEvent.change(mediumSelect, {
-    target: { value: "wood" }
-  });
+  fireEvent.click(departmentsButton);
+  fireEvent.click(await screen.findByRole("button", { name: "[european paintings]" }));
+  fireEvent.click(mediaButton);
+  fireEvent.click(screen.getByRole("button", { name: "[wood]" }));
   fireEvent.click(searchButton);
 
   expect(await screen.findByRole("link", { name: "Landscape Study" })).toHaveAttribute(
@@ -1573,7 +1749,6 @@ test("submitting a whitespace-only query keeps the search route in its empty sta
   });
   fireEvent.click(screen.getByRole("button", { name: "[search]" }));
 
-  expect(screen.getByText("Enter a search to find works.")).toBeInTheDocument();
   expect(window.location.search).toBe("");
   expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
 });
