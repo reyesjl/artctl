@@ -90,7 +90,7 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }, [apiBaseUrl, fetchImpl]);
 
   return (
-    <RouteFrame title="Gallery" maxWidthClassName="max-w-7xl">
+    <RouteFrame maxWidthClassName="max-w-7xl">
       {status === "loading" ? <p>Loading gallery…</p> : null}
       {status === "error" ? <p>{error}</p> : null}
       {status === "success" && results.length === 0 && emptyState ? (

@@ -6,15 +6,17 @@ export function ThemesPage() {
 
   return (
     <main className="app-main">
-      <section className="theme-page max-w-[640px] text-xs">
-        <h1 className="sr-only">Themes</h1>
-        <p className="theme-page-title m-0 text-primary">
+      <section className="theme-page max-w-xl font-mono space-y-4">
+        <div aria-level="1" role="heading" className="sr-only m-0">
+          Theme
+        </div>
+        <p className="theme-page-title m-0 text-xs text-primary">
           ── theme ──
         </p>
-        <p className="theme-page-description mt-4 leading-6 text-muted-foreground">
+        <p className="theme-page-description m-0 text-xs text-muted-foreground">
           Choose a color theme. Your selection is saved locally.
         </p>
-        <div className="theme-grid mt-0 grid gap-2 sm:grid-cols-2">
+        <div className="theme-grid grid gap-2 sm:grid-cols-2">
           {THEMES.map((theme) => {
             const isActive = theme.id === themeId;
 
@@ -25,30 +27,30 @@ export function ThemesPage() {
                 aria-label={theme.label}
                 aria-pressed={isActive}
                 className={[
-                  "theme-option flex w-full items-center gap-3 border px-3 py-2 text-left transition-colors",
+                  "theme-option flex w-full appearance-none items-center gap-3 border border-solid px-3 py-2.5 text-left text-xs font-mono shadow-none transition-colors",
                   isActive
                     ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-card text-foreground"
+                    : "border-border bg-card text-foreground hover:bg-secondary"
                 ].join(" ")}
                 onClick={() => setThemeId(theme.id)}
               >
                 <span className="theme-option-swatches flex shrink-0 gap-1" aria-hidden="true">
                   <span
-                    className="theme-option-swatch h-4 w-4 rounded-sm"
+                    className="theme-option-swatch h-4 w-4 border border-border border-solid"
                     style={{ background: theme.preview.bg }}
                   />
                   <span
-                    className="theme-option-swatch h-4 w-4 rounded-sm"
+                    className="theme-option-swatch h-4 w-4 border border-border border-solid"
                     style={{ background: theme.preview.primary }}
                   />
                 </span>
-                <span className="theme-option-name flex-1 text-xs">{theme.label}</span>
-                {isActive ? <span className="theme-option-check text-xs">✓</span> : null}
+                <span className="theme-option-name flex-1">{theme.label}</span>
+                {isActive ? <span className="theme-option-check text-primary">✓</span> : null}
               </button>
             );
           })}
         </div>
-        <p className="theme-page-footnote mt-4 text-[10px] text-muted-foreground/50">
+        <p className="theme-page-footnote m-0 text-[10px] text-muted-foreground/50">
           theme is stored in browser localStorage
         </p>
       </section>

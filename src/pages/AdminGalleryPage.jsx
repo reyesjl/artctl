@@ -218,13 +218,16 @@ export function AdminGalleryPage({
   }
 
   return (
-    <RouteFrame title={pageTitle} maxWidthClassName="max-w-7xl">
+    <RouteFrame maxWidthClassName="max-w-7xl">
+      <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
+        {pageTitle}
+      </div>
       <form className="grid gap-2 sm:grid-cols-[1fr_auto]" onSubmit={handleSubmit}>
         <label className="grid gap-1 text-xs text-muted-foreground" htmlFor="admin-gallery-object-id">
           Object ID
           <input
             id="admin-gallery-object-id"
-            className="min-h-10 border border-input bg-secondary px-3 py-2 text-foreground"
+            className="min-h-10 appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
             name="objectId"
             type="text"
             value={objectIdInput}
@@ -232,10 +235,11 @@ export function AdminGalleryPage({
           />
         </label>
         <button
-          className="min-h-10 self-end rounded-sm border border-input bg-secondary px-3 text-foreground"
+          aria-label="Add to Gallery"
+          className="text-action self-end"
           type="submit"
         >
-          Add to Gallery
+          [add]
         </button>
       </form>
       {status === "loading" ? <p>Loading curated gallery…</p> : null}
@@ -289,19 +293,21 @@ export function AdminGalleryPage({
                   <p>{`${item.position} · ${item.objectId} · ${item.hydrationStatus}`}</p>
                   {item.hydrationStatus !== "hydrated" ? (
                     <button
-                      className="justify-self-start rounded-sm border border-input bg-secondary px-2 py-1 text-foreground"
+                      aria-label={`Hydrate ${item.title}`}
+                      className="text-action justify-self-start"
                       type="button"
                       onClick={() => handleHydrate(item.objectId)}
                     >
-                      {`Hydrate ${item.title}`}
+                      [hydrate]
                     </button>
                   ) : null}
                   <button
-                    className="justify-self-start rounded-sm border border-input bg-secondary px-2 py-1 text-foreground"
+                    aria-label={`Remove ${item.title}`}
+                    className="text-action justify-self-start"
                     type="button"
                     onClick={() => handleRemove(item.objectId)}
                   >
-                    {`Remove ${item.title}`}
+                    [remove]
                   </button>
                 </div>
               </li>

@@ -46,7 +46,10 @@ export function CreateCuratedGroupPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }
 
   return (
-    <RouteFrame title="Create Curated Group">
+    <RouteFrame>
+      <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
+        Create Curated Group
+      </div>
       <p>
         <Link to="/admin/curated-groups">Back to Curated Groups</Link>
       </p>
@@ -55,7 +58,7 @@ export function CreateCuratedGroupPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           Group Slug
           <input
             id="admin-group-slug"
-            className="min-h-10 border border-input bg-secondary px-3 py-2 text-foreground"
+            className="min-h-10 appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
             name="groupSlug"
             type="text"
             value={groupSlugInput}
@@ -66,7 +69,7 @@ export function CreateCuratedGroupPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           Group Name
           <input
             id="admin-group-name"
-            className="min-h-10 border border-input bg-secondary px-3 py-2 text-foreground"
+            className="min-h-10 appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
             name="groupName"
             type="text"
             value={groupNameInput}
@@ -74,10 +77,11 @@ export function CreateCuratedGroupPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           />
         </label>
         <button
-          className="min-h-10 self-end rounded-sm border border-input bg-secondary px-3 text-foreground"
+          aria-label="Create Group"
+          className="text-action self-end"
           type="submit"
         >
-          Create Group
+          [save]
         </button>
       </form>
       {error ? <p>{error}</p> : null}

@@ -84,7 +84,7 @@ export function createArtctlApp(options = {}) {
         { href: "/", label: "Gallery" },
         { href: "/search", label: "Search" },
         { href: "/help", label: "Help" },
-        { href: "/themes", label: "Themes" },
+        { href: "/theme", label: "Theme" },
         { href: "/admin", label: "Admin" }
       ]
     });

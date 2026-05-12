@@ -75,7 +75,7 @@ function createTextResponse(
 }
 
 describe("SPA route refresh", () => {
-  test.each(["/", "/search", "/works/42", "/help", "/themes"])(
+  test.each(["/", "/search", "/works/42", "/help", "/theme"])(
     "GET %s returns the ARTCTL shell",
     async (url) => {
       const response = await makeRequest(url);

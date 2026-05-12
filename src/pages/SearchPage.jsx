@@ -184,7 +184,10 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }
 
   return (
-    <RouteFrame title="Search">
+    <RouteFrame>
+      <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
+        Search
+      </div>
       <form className="search-form mt-4 grid gap-3" onSubmit={handleSubmit}>
         <label className="search-label block text-xs text-muted-foreground" htmlFor="search-query">
           Query
@@ -192,7 +195,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
         <div className="search-controls flex flex-wrap gap-2">
           <input
             id="search-query"
-            className="search-input min-h-10 flex-[1_1_320px] border border-input bg-secondary px-3 py-2 text-foreground"
+            className="search-input min-h-10 flex-[1_1_320px] appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
             name="q"
             type="search"
             value={draftQuery}
@@ -206,7 +209,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           </label>
           <select
             id="search-department"
-            className="search-input min-h-10 flex-[1_1_320px] border border-input bg-secondary px-3 py-2 text-foreground"
+            className="search-input min-h-10 flex-[1_1_320px] appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
             name="departmentId"
             value={draftDepartmentId}
             onChange={(event) => setDraftDepartmentId(event.target.value)}
@@ -223,7 +226,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           </label>
           <select
             id="search-medium"
-            className="search-input min-h-10 flex-[1_1_320px] border border-input bg-secondary px-3 py-2 text-foreground"
+            className="search-input min-h-10 flex-[1_1_320px] appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
             name="medium"
             value={draftMedium}
             onChange={(event) => setDraftMedium(event.target.value)}
@@ -240,7 +243,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             ))}
           </select>
           <button
-            className="search-button min-h-10 rounded-sm border border-input bg-secondary px-3 text-foreground"
+            className="search-button text-action"
             type="submit"
           >
             [search]
@@ -282,21 +285,23 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             <div className="search-pagination mt-4 flex flex-wrap items-center gap-3">
               {page > 1 ? (
                 <button
-                  className="min-h-10 rounded-sm border border-input bg-secondary px-3 text-foreground"
+                  aria-label="Prev page"
+                  className="text-action"
                   type="button"
                   onClick={() => handlePageChange(page - 1)}
                 >
-                  Prev page
+                  [prev]
                 </button>
               ) : null}
               <span className="text-xs text-muted-foreground">Page {page}</span>
               {results.length === SEARCH_PAGE_SIZE ? (
                 <button
-                  className="min-h-10 rounded-sm border border-input bg-secondary px-3 text-foreground"
+                  aria-label="Next page"
+                  className="text-action"
                   type="button"
                   onClick={() => handlePageChange(page + 1)}
                 >
-                  Next page
+                  [next]
                 </button>
               ) : null}
             </div>

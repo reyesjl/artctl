@@ -36,7 +36,8 @@ export default {
         "sidebar-ring": "hsl(var(--sidebar-ring) / <alpha-value>)"
       },
       fontFamily: {
-        sans: ["IBM Plex Sans", "Inter", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"]
+        mono: ["JetBrains Mono", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"],
+        sans: ["JetBrains Mono", "Segoe UI", "Helvetica Neue", "Arial", "sans-serif"]
       }
     }
   },

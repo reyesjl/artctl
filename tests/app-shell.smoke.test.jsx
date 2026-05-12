@@ -128,7 +128,25 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[themes]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  const header = screen.getByRole("banner");
+  const footer = screen.getByText("v0.1.0").closest("footer");
+  const galleryLink = screen.getByRole("link", { name: "[gallery]" });
+
+  expect(header).not.toHaveClass("bg-card");
+  expect(footer).not.toHaveClass("bg-card");
+  expect(header).toHaveClass("bg-background");
+  expect(footer).toHaveClass("bg-background");
+  const nav = screen.getByRole("navigation", { name: "Primary" });
+  expect(header).toHaveClass("app-header-strip");
+  expect(header).not.toHaveClass("border-b");
+  expect(nav).not.toHaveClass("border-b");
+  expect(footer).toHaveClass("app-footer-strip");
+  expect(footer).not.toHaveClass("border-t");
+  expect(galleryLink).not.toHaveClass("border-b");
+  expect(screen.getByText("ARTCTL", { selector: ".brand" })).toHaveClass("text-sm");
+  expect(screen.getByText("ARTCTL", { selector: ".brand" })).toHaveClass("font-bold");
+  expect(nav).toHaveClass("text-xs");
 });
 
 test("homepage uses a wider route frame than standard pages", async () => {
@@ -136,7 +154,7 @@ test("homepage uses a wider route frame than standard pages", async () => {
 
   render(<App fetchImpl={fetchImpl} />);
 
-  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   const galleryMain = screen.getByRole("main");
   expect(galleryMain.className).toContain("max-w-7xl");
 
@@ -160,7 +178,6 @@ test("work route uses the wider route frame", async () => {
 });
 
 test.each([
-  { route: "/", heading: "Gallery" },
   { route: "/search", heading: "Search" },
   { route: "/works/42", heading: "Work 42" },
   { route: "/admin", heading: "Admin" },
@@ -168,7 +185,7 @@ test.each([
   { route: "/admin/curated-groups/new", heading: "Create Curated Group" },
   { route: "/admin/curated-groups/homepage", heading: "Homepage Gallery" },
   { route: "/help", heading: "Help" },
-  { route: "/themes", heading: "Themes" }
+  { route: "/theme", heading: "Theme" }
 ])("route $route renders its skeleton inside the shared shell", async ({ route, heading }) => {
   window.history.pushState({}, "", route);
 
@@ -179,7 +196,21 @@ test.each([
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[themes]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
+});
+
+test("homepage route renders its shell without a page title", async () => {
+  window.history.pushState({}, "", "/");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
 });
 
@@ -218,10 +249,13 @@ test("curated groups route renders a selectable text list of groups", async () =
     "href",
     "/admin/curated-groups/homepage"
   );
-  expect(screen.getByRole("link", { name: "Create Group" })).toHaveAttribute(
+  const createGroupLink = screen.getByRole("link", { name: "Create Group" });
+
+  expect(createGroupLink).toHaveAttribute(
     "href",
     "/admin/curated-groups/new"
   );
+  expect(createGroupLink).toHaveTextContent("[add]");
   expect(screen.getByRole("main").className).toContain("max-w-[896px]");
 });
 
@@ -251,7 +285,14 @@ test("create curated group route can create a new editorial group", async () => 
   fireEvent.change(screen.getByLabelText("Group Name"), {
     target: { value: "Featured Landscapes" }
   });
-  fireEvent.submit(screen.getByRole("button", { name: "Create Group" }).closest("form"));
+  const saveButton = screen.getByRole("button", { name: "Create Group" });
+
+  expect(saveButton).toHaveTextContent("[save]");
+  expect(saveButton).not.toHaveClass("bg-secondary");
+  expect(saveButton).not.toHaveClass("border-input");
+  expect(saveButton).not.toHaveClass("px-3");
+
+  fireEvent.submit(saveButton.closest("form"));
 
   expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toHaveAttribute(
     "href",
@@ -301,7 +342,12 @@ test("curated groups route can feature a group on the homepage", async () => {
   render(<App fetchImpl={adminFetch} />);
 
   expect(await screen.findByRole("heading", { name: "Curated Groups" })).toBeInTheDocument();
-  fireEvent.click(await screen.findByRole("button", { name: "Feature Featured Landscapes" }));
+  const featureButton = await screen.findByRole("button", { name: "Feature Featured Landscapes" });
+
+  expect(featureButton).toHaveTextContent("[feature]");
+  expect(featureButton).not.toHaveClass("bg-secondary");
+  expect(featureButton).not.toHaveClass("border-input");
+  fireEvent.click(featureButton);
 
   await waitFor(() => {
     expect(requests).toContain("PATCH /api/admin/curated-groups/featured-landscapes/feature");
@@ -311,7 +357,7 @@ test("curated groups route can feature a group on the homepage", async () => {
   window.history.pushState({}, "", "/");
   render(<App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />);
 
-  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
   expect(await screen.findByText("Featured Work 2")).toBeInTheDocument();
   expect(screen.queryByText("Homepage Work")).not.toBeInTheDocument();
 });
@@ -377,14 +423,16 @@ test("admin landing route lets me choose curated groups management", async () =>
   render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
 
   expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
-  expect(
-    screen.getByRole("link", {
-      name: "Curated Groups Manage editorial groups and homepage curation."
-    })
-  ).toHaveAttribute(
+  const curatedGroupsLink = screen.getByRole("link", { name: "[curated groups]" });
+
+  expect(curatedGroupsLink).toHaveAttribute(
     "href",
     "/admin/curated-groups"
   );
+  expect(curatedGroupsLink).toHaveTextContent("[curated groups]");
+  expect(curatedGroupsLink).not.toHaveClass("bg-card");
+  expect(curatedGroupsLink).not.toHaveClass("p-4");
+  expect(curatedGroupsLink).not.toHaveClass("border");
   expect(screen.getByText("Manage editorial groups and homepage curation.")).toBeInTheDocument();
   expect(requests).toEqual(["/api/app-shell"]);
 });
@@ -420,7 +468,12 @@ test("admin gallery route can add a local object id into the curated gallery lis
   fireEvent.change(screen.getByLabelText("Object ID"), {
     target: { value: "25" }
   });
-  fireEvent.submit(screen.getByRole("button", { name: "Add to Gallery" }).closest("form"));
+  const addButton = screen.getByRole("button", { name: "Add to Gallery" });
+
+  expect(addButton).toHaveTextContent("[add]");
+  expect(addButton).not.toHaveClass("bg-secondary");
+  expect(addButton).not.toHaveClass("border-input");
+  fireEvent.submit(addButton.closest("form"));
 
   expect(await screen.findByText("Curated Work 25")).toBeInTheDocument();
   expect(screen.getByText("1 · 25 · pending")).toBeInTheDocument();
@@ -489,7 +542,12 @@ test("admin gallery route can remove a curated item and reflow the remaining pos
 
   expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
   expect(await screen.findByText("Mantel")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Remove Mantel" }));
+  const removeButton = screen.getByRole("button", { name: "Remove Mantel" });
+
+  expect(removeButton).toHaveTextContent("[remove]");
+  expect(removeButton).not.toHaveClass("bg-secondary");
+  expect(removeButton).not.toHaveClass("border-input");
+  fireEvent.click(removeButton);
 
   await waitFor(() => {
     expect(screen.queryByText("Mantel")).not.toBeInTheDocument();
@@ -641,7 +699,12 @@ test("admin gallery route can manually hydrate a curated item and update its car
 
   expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
   expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: 'Hydrate The "Shipwreck Medal"' }));
+  const hydrateButton = screen.getByRole("button", { name: 'Hydrate The "Shipwreck Medal"' });
+
+  expect(hydrateButton).toHaveTextContent("[hydrate]");
+  expect(hydrateButton).not.toHaveClass("bg-secondary");
+  expect(hydrateButton).not.toHaveClass("border-input");
+  fireEvent.click(hydrateButton);
 
   await waitFor(() => {
     expect(screen.getByText("2 · 5046 · hydrated")).toBeInTheDocument();
@@ -710,7 +773,7 @@ test("homepage uses hydrated curated entries from the admin-managed gallery list
     />
   );
 
-  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
   expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
   expect(screen.getByText('The "Shipwreck Medal"').closest("a")).toHaveAttribute("href", "/works/5046");
   expect(screen.queryByRole("link", { name: "Mantel" })).not.toBeInTheDocument();
@@ -724,6 +787,9 @@ test("search route keeps its content on the shared shell background", async () =
   const heading = await screen.findByRole("heading", { name: "Search" });
   const routeFrame = heading.closest("section");
 
+  expect(heading.tagName).toBe("DIV");
+  expect(heading).toHaveAttribute("aria-level", "1");
+  expect(heading).toHaveClass("m-0");
   expect(routeFrame).not.toBeNull();
   expect(routeFrame).toContainElement(screen.getByLabelText("Query"));
   expect(routeFrame).not.toHaveClass("bg-card");
@@ -770,7 +836,7 @@ test("homepage renders highlighted Met works from Express as gallery links", asy
 
   render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
 
-  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
   expect(await screen.findByRole("link", { name: /The Great Wave off Kanagawa/i })).toHaveAttribute(
     "href",
     "/works/436121"
@@ -789,7 +855,7 @@ test("homepage shows catalog readiness messaging through the default Express app
 
   render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
 
-  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
   expect(await screen.findByText("Catalog is not initialized.")).toBeInTheDocument();
   expect(requests).toContain("/api/gallery");
 });
@@ -979,7 +1045,7 @@ test("homepage shows the empty gallery state from a configured SQLite catalog pa
     <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
   );
 
-  expect(await screen.findByRole("heading", { name: "Gallery" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
   expect(await screen.findByText("Gallery coming soon")).toBeInTheDocument();
   expect(screen.getByText("Curated groups have not been configured yet.")).toBeInTheDocument();
   expect(screen.queryByText("Catalog is not initialized.")).not.toBeInTheDocument();
@@ -1226,7 +1292,7 @@ test("search route loads Department filter options from Express", async () => {
   expect(await screen.findByRole("option", { name: "Arms and Armor" })).toHaveValue("6");
 });
 
-test("search route renders themed controls while preserving current submission behavior", async () => {
+test("search route renders text actions while preserving current submission behavior", async () => {
   const metClient = {
     async getDepartments() {
       return {
@@ -1260,13 +1326,23 @@ test("search route renders themed controls while preserving current submission b
   expect(queryInput).toHaveClass("bg-secondary");
   expect(queryInput).toHaveClass("border-input");
   expect(queryInput).toHaveClass("text-foreground");
+  expect(queryInput).toHaveClass("appearance-none");
+  expect(queryInput).toHaveClass("border-solid");
+  expect(queryInput).toHaveClass("shadow-none");
   expect(departmentSelect).toHaveClass("bg-secondary");
   expect(departmentSelect).toHaveClass("border-input");
+  expect(departmentSelect).toHaveClass("appearance-none");
+  expect(departmentSelect).toHaveClass("border-solid");
+  expect(departmentSelect).toHaveClass("shadow-none");
   expect(mediumSelect).toHaveClass("bg-secondary");
   expect(mediumSelect).toHaveClass("border-input");
-  expect(searchButton).toHaveClass("bg-secondary");
-  expect(searchButton).toHaveClass("border-input");
-  expect(searchButton).toHaveClass("text-foreground");
+  expect(mediumSelect).toHaveClass("appearance-none");
+  expect(mediumSelect).toHaveClass("border-solid");
+  expect(mediumSelect).toHaveClass("shadow-none");
+  expect(searchButton).toHaveTextContent("[search]");
+  expect(searchButton).not.toHaveClass("bg-secondary");
+  expect(searchButton).not.toHaveClass("border-input");
+  expect(searchButton).not.toHaveClass("px-3");
 
   fireEvent.change(queryInput, {
     target: { value: "landscape" }
@@ -1397,7 +1473,7 @@ test("search results support explicit next-page navigation", async () => {
   expect(window.location.search).toBe("?q=landscape&page=2");
 });
 
-test("search pagination renders as a themed control surface while preserving page navigation", async () => {
+test("search pagination renders as text actions while preserving page navigation", async () => {
   const metClient = {
     async getDepartments() {
       return { departments: [] };
@@ -1436,9 +1512,10 @@ test("search pagination renders as a themed control surface while preserving pag
   const nextButton = await screen.findByRole("button", { name: "Next page" });
   const pageLabel = screen.getByText("Page 1");
 
-  expect(nextButton).toHaveClass("bg-secondary");
-  expect(nextButton).toHaveClass("border-input");
-  expect(nextButton).toHaveClass("text-foreground");
+  expect(nextButton).toHaveTextContent("[next]");
+  expect(nextButton).not.toHaveClass("bg-secondary");
+  expect(nextButton).not.toHaveClass("border-input");
+  expect(nextButton).not.toHaveClass("px-3");
   expect(pageLabel).toHaveClass("text-muted-foreground");
 
   fireEvent.click(nextButton);
@@ -1876,12 +1953,12 @@ test("help route renders the manual copy on the shared background", async () => 
   ).toBeInTheDocument();
 });
 
-test("themes route matches the Cortex-style theme picker structure and active state", async () => {
-  window.history.pushState({}, "", "/themes");
+test("theme route matches the Cortex-style theme picker structure and active state", async () => {
+  window.history.pushState({}, "", "/theme");
 
   render(<App fetchImpl={fetchImpl} />);
 
-  expect(await screen.findByRole("heading", { name: "Themes" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Theme" })).toBeInTheDocument();
   expect(screen.getByText("── theme ──")).toBeInTheDocument();
   expect(screen.getByText("Choose a color theme. Your selection is saved locally.")).toBeInTheDocument();
   expect(screen.getByText("theme is stored in browser localStorage")).toBeInTheDocument();
@@ -1909,20 +1986,38 @@ test("themes route matches the Cortex-style theme picker structure and active st
   expect(screen.getAllByText("✓")).toHaveLength(1);
 });
 
-test("themes route renders a themed picker surface while preserving theme selection behavior", async () => {
-  window.history.pushState({}, "", "/themes");
+test("theme route renders a themed picker surface while preserving theme selection behavior", async () => {
+  window.history.pushState({}, "", "/theme");
 
   render(<App fetchImpl={fetchImpl} />);
 
   const darkGreen = await screen.findByRole("button", { name: "Dark Green" });
   const solarized = screen.getByRole("button", { name: "Solarized" });
+  const darkGreenSwatches = darkGreen.querySelectorAll(".theme-option-swatch");
 
   expect(darkGreen).toHaveClass("bg-primary/10");
   expect(darkGreen).toHaveClass("border-primary");
   expect(darkGreen).toHaveClass("text-primary");
+  expect(darkGreen).toHaveClass("font-mono");
+  expect(darkGreen).toHaveClass("text-xs");
+  expect(darkGreen).toHaveClass("appearance-none");
+  expect(darkGreen).toHaveClass("border-solid");
+  expect(darkGreen).toHaveClass("shadow-none");
+  expect(darkGreenSwatches).toHaveLength(2);
+  for (const swatch of darkGreenSwatches) {
+    expect(swatch).toHaveClass("border");
+    expect(swatch).toHaveClass("border-border");
+    expect(swatch).toHaveClass("border-solid");
+  }
   expect(solarized).toHaveClass("bg-card");
   expect(solarized).toHaveClass("border-border");
   expect(solarized).toHaveClass("text-foreground");
+  expect(solarized).toHaveClass("font-mono");
+  expect(solarized).toHaveClass("text-xs");
+  expect(solarized).toHaveClass("appearance-none");
+  expect(solarized).toHaveClass("border-solid");
+  expect(solarized).toHaveClass("shadow-none");
+  expect(solarized).toHaveClass("hover:bg-secondary");
 
   fireEvent.click(solarized);
 
@@ -1931,24 +2026,25 @@ test("themes route renders a themed picker surface while preserving theme select
 });
 
 test("selecting a theme updates the picker and shared panel styles to that same theme", async () => {
-  window.history.pushState({}, "", "/themes");
+  window.history.pushState({}, "", "/theme");
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const solarized = THEMES.find((theme) => theme.id === "solarized");
-  const footer = await screen.findByText("v0.1.0");
+  const footer = (await screen.findByText("v0.1.0")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 
   expect(window.localStorage.getItem("artctl-theme")).toBe("solarized");
   expect(screen.getByRole("button", { name: "Solarized" })).toHaveAttribute("aria-pressed", "true");
-  expect(footer).toHaveClass("bg-card");
-  expect(footer).toHaveClass("border-border");
+  expect(footer).toHaveClass("bg-background");
+  expect(footer).not.toHaveClass("bg-card");
+  expect(footer).toHaveClass("app-footer-strip");
+  expect(footer).not.toHaveClass("border-t");
   expect(footer).toHaveClass("text-muted-foreground");
 });
 
 test("activating a Cortex theme applies the original Cortex token values", async () => {
-  window.history.pushState({}, "", "/themes");
+  window.history.pushState({}, "", "/theme");
 
   render(<App fetchImpl={fetchImpl} />);
 
@@ -1960,7 +2056,7 @@ test("activating a Cortex theme applies the original Cortex token values", async
 });
 
 test("choosing a theme stores the preference locally in the browser", async () => {
-  window.history.pushState({}, "", "/themes");
+  window.history.pushState({}, "", "/theme");
 
   render(<App fetchImpl={fetchImpl} />);
 
@@ -1981,7 +2077,7 @@ test("app startup restores the previously chosen theme from browser storage", as
 });
 
 test("the active theme remains applied when navigating to another route", async () => {
-  window.history.pushState({}, "", "/themes");
+  window.history.pushState({}, "", "/theme");
 
   render(<App fetchImpl={fetchImpl} />);
 

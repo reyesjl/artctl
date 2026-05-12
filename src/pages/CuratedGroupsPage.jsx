@@ -79,9 +79,14 @@ export function CuratedGroupsPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }
 
   return (
-    <RouteFrame title="Curated Groups">
+    <RouteFrame>
+      <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
+        Curated Groups
+      </div>
       <p>
-        <Link to="/admin/curated-groups/new">Create Group</Link>
+        <Link aria-label="Create Group" className="text-action" to="/admin/curated-groups/new">
+          [add]
+        </Link>
       </p>
       {status === "loading" ? <p>Loading curated groups…</p> : null}
       {status === "error" ? <p>{error}</p> : null}
@@ -95,11 +100,13 @@ export function CuratedGroupsPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                 <span>Featured on homepage</span>
               ) : (
                 <button
+                  aria-label={`Feature ${group.name}`}
+                  className="text-action"
                   type="button"
                   onClick={() => handleFeatureGroup(group.slug)}
                   disabled={pendingFeatureSlug === group.slug}
                 >
-                  {pendingFeatureSlug === group.slug ? "Featuring…" : `Feature ${group.name}`}
+                  {pendingFeatureSlug === group.slug ? "[featuring]" : "[feature]"}
                 </button>
               )}
             </div>
