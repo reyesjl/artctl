@@ -97,7 +97,8 @@ describe("sqlite catalog round trip", () => {
       date: "1845–57",
       context: "Medal - Bronze",
       imageUrl: "",
-      metUrl: "http://www.metmuseum.org/art/collection/search/5046"
+      metUrl: "http://www.metmuseum.org/art/collection/search/5046",
+      isPublicDomain: true
     });
     await expect(catalog.getDepartments()).resolves.toEqual({
       departments: [{ departmentId: 1, displayName: "The American Wing" }]

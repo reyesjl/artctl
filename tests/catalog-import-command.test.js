@@ -214,7 +214,8 @@ describe("catalog import command", () => {
       date: "ca. 1800",
       context: "Mantel - Wood, composition ornament",
       imageUrl: "",
-      metUrl: "http://www.metmuseum.org/art/collection/search/4926"
+      metUrl: "http://www.metmuseum.org/art/collection/search/4926",
+      isPublicDomain: true
     });
   });
 
@@ -296,7 +297,8 @@ describe("catalog import command", () => {
       date: "1845–57",
       context: "Medal - Bronze",
       imageUrl: "",
-      metUrl: "http://www.metmuseum.org/art/collection/search/5046"
+      metUrl: "http://www.metmuseum.org/art/collection/search/5046",
+      isPublicDomain: true
     });
   });
 

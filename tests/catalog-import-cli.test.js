@@ -117,7 +117,8 @@ describe("catalog import cli", () => {
       date: "1845–57",
       context: "Medal - Bronze",
       imageUrl: "",
-      metUrl: "http://www.metmuseum.org/art/collection/search/5046"
+      metUrl: "http://www.metmuseum.org/art/collection/search/5046",
+      isPublicDomain: true
     });
   });
 
