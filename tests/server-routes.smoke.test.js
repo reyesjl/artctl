@@ -364,7 +364,7 @@ describe("configured SQLite catalog runtime", () => {
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
     const response = await makeRequest("/api/admin/curated-groups", adminApp, {
       method: "POST",
-      body: { slug: "featured-landscapes", name: "Featured Landscapes" }
+      body: { name: "Featured Landscapes" }
     });
 
     expect(response.statusCode).toBe(201);
@@ -415,19 +415,103 @@ describe("configured SQLite catalog runtime", () => {
       (
         await makeRequest("/api/admin/curated-groups", adminApp, {
           method: "POST",
-          body: { slug: "featured-landscapes", name: "Featured Landscapes" }
+          body: { name: "Featured Landscapes" }
         })
       ).statusCode
     ).toBe(201);
 
     const response = await makeRequest("/api/admin/curated-groups", adminApp, {
       method: "POST",
-      body: { slug: "featured-prints", name: "Featured Landscapes" }
+      body: { name: "Featured Landscapes" }
     });
 
     expect(response.statusCode).toBe(409);
     expect(JSON.parse(response._getData())).toEqual({
       error: "Curated group name already exists."
+    });
+  });
+
+  test("PATCH /api/admin/curated-groups/:slug renames an editorial group and derives a new slug", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+
+    expect(
+      (
+        await makeRequest("/api/admin/curated-groups", adminApp, {
+          method: "POST",
+          body: { name: "Featured Landscapes" }
+        })
+      ).statusCode
+    ).toBe(201);
+
+    const response = await makeRequest("/api/admin/curated-groups/featured-landscapes", adminApp, {
+      method: "PATCH",
+      body: { name: "Evening Paintings" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true,
+      group: {
+        slug: "evening-paintings",
+        name: "Evening Paintings",
+        objectCount: 0,
+        isHomepageFeatured: false
+      }
+    });
+  });
+
+  test("DELETE /api/admin/curated-groups/:slug removes an editorial group", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+
+    expect(
+      (
+        await makeRequest("/api/admin/curated-groups", adminApp, {
+          method: "POST",
+          body: { name: "Featured Landscapes" }
+        })
+      ).statusCode
+    ).toBe(201);
+
+    const response = await makeRequest("/api/admin/curated-groups/featured-landscapes", adminApp, {
+      method: "DELETE"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true
+    });
+
+    const listResponse = await makeRequest("/api/admin/curated-groups", adminApp);
+
+    expect(JSON.parse(listResponse._getData())).toEqual({
+      results: [
+        {
+          slug: "homepage",
+          name: "Homepage Gallery",
+          objectCount: 0,
+          isHomepageFeatured: true
+        }
+      ]
     });
   });
 

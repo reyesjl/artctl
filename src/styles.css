@@ -82,7 +82,6 @@ a {
   padding: 0;
   border: 0;
   background: transparent;
-  color: hsl(var(--foreground));
   font: inherit;
   line-height: inherit;
   cursor: pointer;

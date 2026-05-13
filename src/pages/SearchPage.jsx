@@ -231,9 +231,11 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
   return (
     <RouteFrame maxWidthClassName="max-w-7xl">
-      <div className="search-shell w-full max-w-full border border-border border-solid divide-y divide-border font-mono">
+      <div className="search-shell w-full max-w-full border border-border bg-card divide-y divide-border font-mono">
         <form className="search-form" onSubmit={handleSubmit}>
-          <div className="px-3 py-2 text-xs text-primary">{"> type search"}</div>
+          <div className="border-b border-border px-3 py-1 text-xs text-muted-foreground">
+            {"> type search"}
+          </div>
           <div>
             <label className="sr-only" htmlFor="search-query">
               Query
@@ -241,7 +243,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             <div className="search-controls flex flex-wrap items-center">
               <input
                 id="search-query"
-                className="search-input min-h-10 w-full appearance-none border-0 bg-transparent bg-none px-3 py-2 text-foreground shadow-none outline-none ring-0 focus:outline-none focus:ring-0"
+                className="search-input min-h-10 w-full appearance-none border-0 bg-transparent bg-none px-3 py-3 font-mono text-sm text-foreground shadow-none outline-none ring-0 placeholder:text-muted-foreground/50 focus:outline-none focus:ring-0"
                 name="q"
                 type="search"
                 placeholder="artist, title, culture, medium..."

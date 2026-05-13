@@ -207,12 +207,11 @@ export function createArtctlApp(options = {}) {
       return;
     }
 
-    const slug = String(request.body?.slug ?? "").trim();
     const name = String(request.body?.name ?? "").trim();
 
-    if (!slug || !name) {
+    if (!name) {
       response.status(400).json({
-        error: "Curated group slug and name are required."
+        error: "Curated group name is required."
       });
       return;
     }
@@ -224,7 +223,7 @@ export function createArtctlApp(options = {}) {
       return;
     }
 
-    const group = await catalog.createAdminCuratedGroup({ slug, name });
+    const group = await catalog.createAdminCuratedGroup({ name });
 
     if (group?.error) {
       response.status(409).json({
@@ -263,6 +262,82 @@ export function createArtctlApp(options = {}) {
     response.json({
       ok: true,
       group
+    });
+  });
+
+  app.patch("/api/admin/curated-groups/:slug", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const name = String(request.body?.name ?? "").trim();
+
+    if (!name) {
+      response.status(400).json({
+        error: "Curated group name is required."
+      });
+      return;
+    }
+
+    if (!catalog?.updateAdminCuratedGroup) {
+      response.status(501).json({
+        error: "Curated group editing is not supported."
+      });
+      return;
+    }
+
+    const group = await catalog.updateAdminCuratedGroup(request.params.slug, { name });
+
+    if (!group) {
+      response.status(404).json({
+        error: "Curated group not found."
+      });
+      return;
+    }
+
+    if (group.error) {
+      response.status(409).json({
+        error: group.error
+      });
+      return;
+    }
+
+    response.json({
+      ok: true,
+      group
+    });
+  });
+
+  app.delete("/api/admin/curated-groups/:slug", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    if (!catalog?.deleteAdminCuratedGroup) {
+      response.status(501).json({
+        error: "Curated group editing is not supported."
+      });
+      return;
+    }
+
+    const deleted = await catalog.deleteAdminCuratedGroup(request.params.slug);
+
+    if (deleted === false) {
+      response.status(404).json({
+        error: "Curated group not found."
+      });
+      return;
+    }
+
+    if (deleted?.error) {
+      response.status(409).json({
+        error: deleted.error
+      });
+      return;
+    }
+
+    response.json({
+      ok: true
     });
   });
 

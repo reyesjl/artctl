@@ -132,6 +132,14 @@ function normalizeCuratedGroupSlug(groupSlug) {
   return normalizedGroupSlug || defaultHomepageCuratedGroupSlug;
 }
 
+function deriveCuratedGroupSlug(name) {
+  return String(name ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function withDatabase(databasePath, work) {
   const database = new DatabaseSync(databasePath);
 
@@ -450,6 +458,27 @@ function mapCuratedGroupRow(row) {
   };
 }
 
+function selectCuratedGroupBySlug(database, slug) {
+  return mapCuratedGroupRow(
+    database
+      .prepare(
+        `
+          SELECT
+            curated_groups.slug AS slug,
+            curated_groups.name AS name,
+            COUNT(curated_group_objects.object_id) AS objectCount,
+            MAX(curated_groups.is_homepage_featured) AS isHomepageFeatured
+          FROM curated_groups
+          LEFT JOIN curated_group_objects
+            ON curated_group_objects.group_id = curated_groups.group_id
+          WHERE curated_groups.slug = ?
+          GROUP BY curated_groups.group_id, curated_groups.slug, curated_groups.name
+        `
+      )
+      .get(slug)
+  );
+}
+
 export function createSqliteCatalog({
   databasePath,
   curatedGroups = [],
@@ -624,9 +653,10 @@ export function createSqliteCatalog({
       return { results: rows.map(mapCuratedGroupRow) };
     },
 
-    async createAdminCuratedGroup({ slug, name }) {
+    async createAdminCuratedGroup({ name }) {
       return withDatabase(databasePath, (database) => {
         migrateLegacyCuratedGalleryItems(database);
+        const slug = deriveCuratedGroupSlug(name);
 
         const existingName = database
           .prepare(
@@ -644,6 +674,12 @@ export function createSqliteCatalog({
           };
         }
 
+        if (!slug) {
+          return {
+            error: "Curated group name is required."
+          };
+        }
+
         database
           .prepare(
             `
@@ -653,24 +689,63 @@ export function createSqliteCatalog({
           )
           .run(slug, name);
 
-        return mapCuratedGroupRow(
-          database
-            .prepare(
-              `
-                SELECT
-                  curated_groups.slug AS slug,
-                  curated_groups.name AS name,
-                  COUNT(curated_group_objects.object_id) AS objectCount,
-                  MAX(curated_groups.is_homepage_featured) AS isHomepageFeatured
-                FROM curated_groups
-                LEFT JOIN curated_group_objects
-                  ON curated_group_objects.group_id = curated_groups.group_id
-                WHERE curated_groups.slug = ?
-                GROUP BY curated_groups.group_id, curated_groups.slug, curated_groups.name
-              `
-            )
-            .get(slug)
-        );
+        return selectCuratedGroupBySlug(database, slug);
+      });
+    },
+
+    async updateAdminCuratedGroup(groupSlug, { name }) {
+      return withDatabase(databasePath, (database) => {
+        migrateLegacyCuratedGalleryItems(database);
+        const currentSlug = normalizeCuratedGroupSlug(groupSlug);
+
+        if (currentSlug === defaultHomepageCuratedGroupSlug) {
+          return {
+            error: "Homepage Gallery cannot be edited."
+          };
+        }
+
+        const groupId = getCuratedGroupId(database, currentSlug);
+
+        if (groupId === 0) {
+          return null;
+        }
+
+        const nextName = String(name ?? "").trim();
+        const nextSlug = deriveCuratedGroupSlug(nextName);
+
+        if (!nextName || !nextSlug) {
+          return {
+            error: "Curated group name is required."
+          };
+        }
+
+        const existingName = database
+          .prepare(
+            `
+              SELECT group_id AS groupId
+              FROM curated_groups
+              WHERE name = ? AND group_id <> ?
+            `
+          )
+          .get(nextName, groupId);
+
+        if (existingName) {
+          return {
+            error: "Curated group name already exists."
+          };
+        }
+
+        database
+          .prepare(
+            `
+              UPDATE curated_groups
+              SET slug = ?, name = ?
+              WHERE group_id = ?
+            `
+          )
+          .run(nextSlug, nextName, groupId);
+
+        return selectCuratedGroupBySlug(database, nextSlug);
       });
     },
 
@@ -715,6 +790,42 @@ export function createSqliteCatalog({
           )
           .get(groupId)
         );
+      });
+    },
+
+    async deleteAdminCuratedGroup(groupSlug) {
+      return withDatabase(databasePath, (database) => {
+        migrateLegacyCuratedGalleryItems(database);
+        const currentSlug = normalizeCuratedGroupSlug(groupSlug);
+
+        if (currentSlug === defaultHomepageCuratedGroupSlug) {
+          return {
+            error: "Homepage Gallery cannot be deleted."
+          };
+        }
+
+        const groupId = getCuratedGroupId(database, currentSlug);
+
+        if (groupId === 0) {
+          return false;
+        }
+
+        database.exec("BEGIN");
+
+        try {
+          database
+            .prepare("DELETE FROM curated_group_objects WHERE group_id = ?")
+            .run(groupId);
+          database
+            .prepare("DELETE FROM curated_groups WHERE group_id = ?")
+            .run(groupId);
+          database.exec("COMMIT");
+        } catch (error) {
+          database.exec("ROLLBACK");
+          throw error;
+        }
+
+        return true;
       });
     },
 

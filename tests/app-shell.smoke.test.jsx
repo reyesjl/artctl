@@ -252,11 +252,23 @@ test("curated groups route renders a selectable text list of groups", async () =
     }).ok
   ).toBe(true);
 
+  const fetchImpl = createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath });
+
+  expect(
+    (
+      await fetchImpl("http://artctl.test/api/admin/curated-groups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ name: "Featured Landscapes" })
+      })
+    ).ok
+  ).toBe(true);
+
   window.history.pushState({}, "", "/admin/curated-groups");
 
-  render(
-    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
-  );
+  render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByRole("heading", { name: "Curated Groups" })).toBeInTheDocument();
   expect(requests).toContain("/api/admin/curated-groups");
@@ -264,6 +276,25 @@ test("curated groups route renders a selectable text list of groups", async () =
     "href",
     "/admin/curated-groups/homepage"
   );
+  expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toHaveAttribute(
+    "href",
+    "/admin/curated-groups/featured-landscapes"
+  );
+  expect(screen.getByRole("button", { name: "Feature Featured Landscapes" })).toHaveTextContent("[ ]");
+  expect(screen.getByRole("button", { name: "Feature Homepage Gallery" })).toHaveTextContent("[f]");
+  const editButton = screen.getByRole("button", { name: "Edit Featured Landscapes" });
+  const deleteButton = screen.getByRole("button", { name: "Delete Featured Landscapes" });
+  const featureButton = screen.getByRole("button", { name: "Feature Featured Landscapes" });
+  const controlCluster = editButton.parentElement;
+
+  expect(editButton).toHaveTextContent("[edit]");
+  expect(deleteButton).toHaveTextContent("[delete]");
+  expect(controlCluster).toHaveClass("ml-auto");
+  expect(controlCluster).toHaveClass("justify-end");
+  expect(editButton).toHaveClass("text-muted-foreground");
+  expect(editButton).toHaveClass("hover:text-primary");
+  expect(deleteButton).toHaveClass("text-muted-foreground");
+  expect(deleteButton).toHaveClass("hover:text-destructive");
   const createGroupLink = screen.getByRole("link", { name: "Create Group" });
 
   expect(createGroupLink).toHaveAttribute(
@@ -293,21 +324,16 @@ test("create curated group route can create a new editorial group", async () => 
   );
 
   expect(await screen.findByRole("heading", { name: "Create Curated Group" })).toBeInTheDocument();
-
-  fireEvent.change(screen.getByLabelText("Group Slug"), {
-    target: { value: "featured-landscapes" }
-  });
-  fireEvent.change(screen.getByLabelText("Group Name"), {
+  expect(screen.getByText("> add curated group")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Group Slug")).not.toBeInTheDocument();
+  const nameInput = screen.getByLabelText("Group Name");
+  expect(nameInput).toHaveClass("bg-transparent");
+  expect(nameInput.closest("form")).toHaveClass("border");
+  expect(nameInput.closest("form")).toHaveClass("bg-card");
+  fireEvent.change(nameInput, {
     target: { value: "Featured Landscapes" }
   });
-  const saveButton = screen.getByRole("button", { name: "Create Group" });
-
-  expect(saveButton).toHaveTextContent("[save]");
-  expect(saveButton).not.toHaveClass("bg-secondary");
-  expect(saveButton).not.toHaveClass("border-input");
-  expect(saveButton).not.toHaveClass("px-3");
-
-  fireEvent.submit(saveButton.closest("form"));
+  fireEvent.submit(nameInput.closest("form"));
 
   expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toHaveAttribute(
     "href",
@@ -358,8 +384,10 @@ test("curated groups route can feature a group on the homepage", async () => {
 
   expect(await screen.findByRole("heading", { name: "Curated Groups" })).toBeInTheDocument();
   const featureButton = await screen.findByRole("button", { name: "Feature Featured Landscapes" });
+  const homepageFeatureMarker = screen.getByRole("button", { name: "Feature Homepage Gallery" });
 
-  expect(featureButton).toHaveTextContent("[feature]");
+  expect(featureButton).toHaveTextContent("[ ]");
+  expect(homepageFeatureMarker).toHaveTextContent("[f]");
   expect(featureButton).not.toHaveClass("bg-secondary");
   expect(featureButton).not.toHaveClass("border-input");
   fireEvent.click(featureButton);
@@ -368,9 +396,8 @@ test("curated groups route can feature a group on the homepage", async () => {
     expect(requests).toContain("PATCH /api/admin/curated-groups/featured-landscapes/feature");
   });
   expect(screen.getByRole("link", { name: "Featured Landscapes" })).toHaveClass("text-primary");
-  expect(screen.queryByText("Featured on homepage")).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Feature Featured Landscapes" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Feature Homepage Gallery" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Feature Featured Landscapes" })).toHaveTextContent("[f]");
+  expect(screen.getByRole("button", { name: "Feature Homepage Gallery" })).toHaveTextContent("[ ]");
 
   cleanup();
   window.history.pushState({}, "", "/");
@@ -400,6 +427,183 @@ test("group detail route does not render group creation controls", async () => {
   expect(screen.queryByLabelText("Group Slug")).not.toBeInTheDocument();
   expect(screen.queryByLabelText("Group Name")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Create Group" })).not.toBeInTheDocument();
+});
+
+test("curated groups route can rename a user-created group inline", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  const fetchImpl = createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath });
+
+  expect(
+    (
+      await fetchImpl("http://artctl.test/api/admin/curated-groups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ name: "Featured Landscapes" })
+      })
+    ).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups");
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit Featured Landscapes" }));
+
+  const nameInput = screen.getByLabelText("Group Name");
+  expect(screen.getByText("> edit curated group (esc to cancel)")).toBeInTheDocument();
+  expect(nameInput).toHaveValue("Featured Landscapes");
+  fireEvent.change(nameInput, { target: { value: "Evening Paintings" } });
+  fireEvent.keyDown(nameInput, { key: "Enter" });
+
+  expect(await screen.findByRole("link", { name: "Evening Paintings" })).toHaveAttribute(
+    "href",
+    "/admin/curated-groups/evening-paintings"
+  );
+  expect(requests).toContain("PATCH /api/admin/curated-groups/featured-landscapes");
+});
+
+test("curated groups inline edit can be canceled with escape", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  const fetchImpl = createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath });
+
+  expect(
+    (
+      await fetchImpl("http://artctl.test/api/admin/curated-groups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ name: "Featured Landscapes" })
+      })
+    ).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups");
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Edit Featured Landscapes" }));
+
+  const nameInput = screen.getByLabelText("Group Name");
+  fireEvent.change(nameInput, { target: { value: "Evening Paintings" } });
+  fireEvent.keyDown(nameInput, { key: "Escape" });
+
+  expect(screen.queryByLabelText("Group Name")).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Featured Landscapes" })).toBeInTheDocument();
+  expect(requests).not.toContain("PATCH /api/admin/curated-groups/featured-landscapes");
+});
+
+test("curated groups route can delete a user-created group inline", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  const fetchImpl = createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath });
+
+  expect(
+    (
+      await fetchImpl("http://artctl.test/api/admin/curated-groups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ name: "Featured Landscapes" })
+      })
+    ).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups");
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Featured Landscapes" }));
+
+  expect(screen.getByRole("button", { name: "Confirm delete Featured Landscapes" })).toHaveTextContent(
+    "[confirm delete]"
+  );
+  expect(screen.getByRole("button", { name: "Cancel delete Featured Landscapes" })).toHaveTextContent(
+    "[cancel]"
+  );
+  expect(requests).not.toContain("DELETE /api/admin/curated-groups/featured-landscapes");
+
+  fireEvent.click(screen.getByRole("button", { name: "Confirm delete Featured Landscapes" }));
+
+  await waitFor(() => {
+    expect(screen.queryByRole("link", { name: "Featured Landscapes" })).not.toBeInTheDocument();
+  });
+  expect(requests).toContain("DELETE /api/admin/curated-groups/featured-landscapes");
+});
+
+test("curated groups delete confirmation can be canceled without removing the row", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  const fetchImpl = createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath });
+
+  expect(
+    (
+      await fetchImpl("http://artctl.test/api/admin/curated-groups", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ name: "Featured Landscapes" })
+      })
+    ).ok
+  ).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups");
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("link", { name: "Featured Landscapes" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete Featured Landscapes" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel delete Featured Landscapes" }));
+
+  expect(screen.queryByRole("button", { name: "Confirm delete Featured Landscapes" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Featured Landscapes" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Delete Featured Landscapes" })).toBeInTheDocument();
+  expect(requests).not.toContain("DELETE /api/admin/curated-groups/featured-landscapes");
 });
 
 test("curated groups route can open a selected group at its slug route", async () => {
@@ -1299,7 +1503,10 @@ test("homepage renders gallery cards as themed surfaces while preserving links a
   expect(card).toHaveClass("focus-within:border-primary");
   expect(card).toHaveClass("active:border-primary");
   expect(cardLink).toHaveAttribute("href", "/works/436524");
+  expect(title).toHaveClass("line-clamp-2");
+  expect(title).toHaveClass("text-sm");
   expect(title).toHaveClass("text-foreground");
+  expect(meta).toHaveClass("text-xs");
   expect(meta).toHaveClass("text-muted-foreground");
 });
 
@@ -1519,9 +1726,15 @@ test("search route renders text actions while preserving current submission beha
   const departmentsButton = screen.getByRole("button", { name: "[departments]" });
   const mediaButton = screen.getByRole("button", { name: "[media]" });
   const searchButton = screen.getByRole("button", { name: "[search]" });
+  const searchShell = queryInput.closest(".search-shell");
 
+  expect(screen.getByText("> type search")).toBeInTheDocument();
+  expect(searchShell).toHaveClass("border");
+  expect(searchShell).toHaveClass("bg-card");
   expect(queryInput).toHaveClass("text-foreground");
   expect(queryInput).toHaveClass("appearance-none");
+  expect(queryInput).toHaveClass("bg-transparent");
+  expect(queryInput).toHaveClass("font-mono");
   expect(queryInput).toHaveClass("shadow-none");
   expect(queryInput).toHaveAttribute("placeholder", "artist, title, culture, medium...");
   expect(departmentsButton).toHaveTextContent("[departments]");
@@ -1995,6 +2208,14 @@ test("direct entry to an image-backed work route shows inspection controls", asy
   expect(screen.getByRole("button", { name: "Zoom in" })).toHaveTextContent("[+]");
   expect(screen.getByRole("button", { name: "Zoom out" })).toHaveTextContent("[-]");
   expect(screen.getByRole("button", { name: "Reset view" })).toHaveTextContent("[reset]");
+  expect(screen.getByText("mode")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Original mode" })).toHaveTextContent("[1 original]");
+  expect(screen.getByRole("button", { name: "Edges mode" })).toHaveTextContent("[2 edges]");
+  expect(screen.getByRole("button", { name: "Detail mode" })).toHaveTextContent("[3 detail]");
+  expect(screen.getByRole("button", { name: "Composition mode" })).toHaveTextContent("[4 composition]");
+  expect(screen.getByRole("button", { name: "Original mode" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Original mode" })).toHaveClass("text-primary");
+  expect(screen.getByRole("button", { name: "Edges mode" })).not.toHaveClass("text-primary");
 });
 
 test("work viewer zoom controls change the artwork presentation and reset to the default view", async () => {
@@ -2024,17 +2245,120 @@ test("work viewer zoom controls change the artwork presentation and reset to the
   expect(overlay).toContainElement(screen.getByRole("button", { name: "Zoom in" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edges mode" }));
 
-  expect(image).toHaveStyle({
+  expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa (Edges)" })).toHaveStyle({
     transform: "translate(0px, 0px) scale(1.5)"
   });
   expect(overlay).toContainElement(screen.getByRole("button", { name: "Reset view" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Reset view" }));
 
-  expect(image).toHaveStyle({
+  expect(screen.getByRole("img", { name: "The Great Wave off Kanagawa" })).toHaveStyle({
     transform: "translate(0px, 0px) scale(1)"
   });
+  expect(screen.getByRole("button", { name: "Original mode" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Edges mode" })).toHaveAttribute("aria-pressed", "false");
+});
+
+test("reset view stays enabled for non-original analysis modes even at the default zoom level", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Edges mode" }));
+
+  const resetView = screen.getByRole("button", { name: "Reset view" });
+
+  expect(resetView).toBeEnabled();
+
+  fireEvent.click(resetView);
+
+  expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Original mode" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("switching viewer modes replaces the displayed artwork with a browser-computed analysis view", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  expect(image).toHaveAttribute("src", "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg");
+
+  fireEvent.click(screen.getByRole("button", { name: "Edges mode" }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("img", { name: "The Great Wave off Kanagawa (Edges)" })).toBeInTheDocument();
+  });
+  expect(screen.queryByRole("img", { name: "The Great Wave off Kanagawa" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Edges mode" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Original mode" })).toHaveAttribute("aria-pressed", "false");
+  expect(screen.getByRole("button", { name: "Edges mode" })).toHaveClass("text-primary");
+  expect(screen.getByRole("button", { name: "Original mode" })).not.toHaveClass("text-primary");
+});
+
+test("number keys 1 through 4 switch the active viewer mode", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  fireEvent.keyDown(window, { key: "2" });
+  expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa (Edges)" })).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "3" });
+  expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa (Detail)" })).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "4" });
+  expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa (Composition)" })).toBeInTheDocument();
+
+  fireEvent.keyDown(window, { key: "1" });
+  expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Original mode" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("dragging a zoomed work image pans it without displacing the metadata panel", async () => {
@@ -2157,6 +2481,10 @@ test("work viewer shows a themed unavailable-image state while preserving metada
   expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Reset view" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Original mode" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Edges mode" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Detail mode" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Composition mode" })).not.toBeInTheDocument();
   expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
 });
 

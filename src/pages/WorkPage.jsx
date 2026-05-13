@@ -5,6 +5,29 @@ import { RouteFrame } from "../components/RouteFrame.jsx";
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const SCALE_STEP = 0.5;
+const VIEWER_MODES = ["original", "edges", "detail", "composition"];
+const MODE_PRESENTATION = {
+  original: {
+    suffix: "",
+    filter: "none"
+  },
+  edges: {
+    suffix: " (Edges)",
+    filter: "grayscale(1) contrast(2.2) brightness(1.15)"
+  },
+  detail: {
+    suffix: " (Detail)",
+    filter: "contrast(1.35) saturate(1.25) brightness(1.05)"
+  },
+  composition: {
+    suffix: " (Composition)",
+    filter: "grayscale(0.35) contrast(0.9) brightness(1.1) sepia(0.18)"
+  }
+};
+
+function getModeButtonClassName(isActive) {
+  return isActive ? "text-action text-primary" : "text-action";
+}
 
 export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const { objectId } = useParams();
@@ -12,6 +35,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [error, setError] = useState("");
   const [scale, setScale] = useState(MIN_SCALE);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [activeMode, setActiveMode] = useState("original");
   const dragStateRef = useRef(null);
 
   useEffect(() => {
@@ -45,8 +69,33 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   useEffect(() => {
     setScale(MIN_SCALE);
     setPan({ x: 0, y: 0 });
+    setActiveMode("original");
     dragStateRef.current = null;
   }, [objectId, work?.imageUrl]);
+
+  useEffect(() => {
+    if (!work?.imageUrl) {
+      return undefined;
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "1") {
+        setActiveMode("original");
+      } else if (event.key === "2") {
+        setActiveMode("edges");
+      } else if (event.key === "3") {
+        setActiveMode("detail");
+      } else if (event.key === "4") {
+        setActiveMode("composition");
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [work?.imageUrl]);
 
   function updateScale(nextScale) {
     const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
@@ -68,6 +117,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
   function handleResetView() {
     updateScale(MIN_SCALE);
+    setActiveMode("original");
   }
 
   function handleMouseDown(event) {
@@ -104,6 +154,19 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     dragStateRef.current = null;
   }
 
+  function handleModeChange(nextMode) {
+    if (!VIEWER_MODES.includes(nextMode)) {
+      return;
+    }
+
+    setActiveMode(nextMode);
+  }
+
+  const currentModePresentation = MODE_PRESENTATION[activeMode];
+  const displayedTitle = work?.title
+    ? `${work.title}${currentModePresentation.suffix}`
+    : `Work ${objectId}`;
+
   return (
     <RouteFrame maxWidthClassName="max-w-7xl">
       <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
@@ -120,7 +183,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             {work.imageUrl ? (
               <>
                 <figcaption
-                  className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-sm border border-border bg-background/45 px-3 py-2 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-background/60 focus-within:bg-background/60"
+                  className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-sm border border-border bg-background/45 px-3 py-2 text-xs text-foreground/80 shadow-sm transition-colors hover:bg-background/60 hover:text-foreground focus-within:bg-background/60 focus-within:text-foreground"
                   aria-label="Artwork inspection controls"
                 >
                   <span>zoom</span>
@@ -147,16 +210,59 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                     className="text-action"
                     aria-label="Reset view"
                     onClick={handleResetView}
-                    disabled={scale === MIN_SCALE && pan.x === 0 && pan.y === 0}
+                    disabled={
+                      scale === MIN_SCALE &&
+                      pan.x === 0 &&
+                      pan.y === 0 &&
+                      activeMode === "original"
+                    }
                   >
                     [reset]
+                  </button>
+                  <span>mode</span>
+                  <button
+                    type="button"
+                    className={getModeButtonClassName(activeMode === "original")}
+                    aria-label="Original mode"
+                    aria-pressed={activeMode === "original"}
+                    onClick={() => handleModeChange("original")}
+                  >
+                    [1 original]
+                  </button>
+                  <button
+                    type="button"
+                    className={getModeButtonClassName(activeMode === "edges")}
+                    aria-label="Edges mode"
+                    aria-pressed={activeMode === "edges"}
+                    onClick={() => handleModeChange("edges")}
+                  >
+                    [2 edges]
+                  </button>
+                  <button
+                    type="button"
+                    className={getModeButtonClassName(activeMode === "detail")}
+                    aria-label="Detail mode"
+                    aria-pressed={activeMode === "detail"}
+                    onClick={() => handleModeChange("detail")}
+                  >
+                    [3 detail]
+                  </button>
+                  <button
+                    type="button"
+                    className={getModeButtonClassName(activeMode === "composition")}
+                    aria-label="Composition mode"
+                    aria-pressed={activeMode === "composition"}
+                    onClick={() => handleModeChange("composition")}
+                  >
+                    [4 composition]
                   </button>
                 </figcaption>
                 <div className="work-image-stage min-h-[320px] overflow-hidden">
                   <img
+                    key={activeMode}
                     className="work-image block h-auto w-full select-none"
                     src={work.imageUrl}
-                    alt={work.title}
+                    alt={displayedTitle}
                     draggable="false"
                     onMouseDown={handleMouseDown}
                     onMouseMove={handleMouseMove}
@@ -164,6 +270,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                     onMouseLeave={handleMouseUp}
                     style={{
                       cursor: scale > MIN_SCALE ? (dragStateRef.current ? "grabbing" : "grab") : "default",
+                      filter: currentModePresentation.filter,
                       transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
                       transformOrigin: "center center",
                       transition: dragStateRef.current ? "none" : "transform 150ms ease"

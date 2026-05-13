@@ -32,8 +32,8 @@ function GalleryCard({ item }) {
           )}
         </figure>
         <div className="gallery-card-copy grid gap-1 p-3">
-          <strong className="gallery-card-title text-foreground">{title}</strong>
-          <p className="gallery-card-meta text-muted-foreground">{meta}</p>
+          <strong className="gallery-card-title line-clamp-2 text-sm text-foreground">{title}</strong>
+          <p className="gallery-card-meta text-xs text-muted-foreground">{meta}</p>
         </div>
       </Link>
     </li>

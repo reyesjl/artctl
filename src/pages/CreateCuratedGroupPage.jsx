@@ -4,17 +4,15 @@ import { RouteFrame } from "../components/RouteFrame.jsx";
 
 export function CreateCuratedGroupPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const navigate = useNavigate();
-  const [groupSlugInput, setGroupSlugInput] = useState("");
   const [groupNameInput, setGroupNameInput] = useState("");
   const [error, setError] = useState("");
 
   async function handleCreateGroup(event) {
     event.preventDefault();
 
-    const slug = groupSlugInput.trim();
     const name = groupNameInput.trim();
 
-    if (!slug || !name) {
+    if (!name) {
       return;
     }
 
@@ -26,7 +24,7 @@ export function CreateCuratedGroupPage({ apiBaseUrl = "", fetchImpl = fetch }) {
         headers: {
           "content-type": "application/json"
         },
-        body: JSON.stringify({ slug, name })
+        body: JSON.stringify({ name })
       });
       const data = await response.json();
 
@@ -53,36 +51,20 @@ export function CreateCuratedGroupPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       <p>
         <Link to="/admin/curated-groups">Back to Curated Groups</Link>
       </p>
-      <form className="grid gap-2 sm:grid-cols-3" onSubmit={handleCreateGroup}>
-        <label className="grid gap-1 text-xs text-muted-foreground" htmlFor="admin-group-slug">
-          Group Slug
-          <input
-            id="admin-group-slug"
-            className="min-h-10 appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
-            name="groupSlug"
-            type="text"
-            value={groupSlugInput}
-            onChange={(event) => setGroupSlugInput(event.target.value)}
-          />
-        </label>
-        <label className="grid gap-1 text-xs text-muted-foreground" htmlFor="admin-group-name">
-          Group Name
-          <input
-            id="admin-group-name"
-            className="min-h-10 appearance-none border border-input border-solid bg-secondary px-3 py-2 text-foreground shadow-none"
-            name="groupName"
-            type="text"
-            value={groupNameInput}
-            onChange={(event) => setGroupNameInput(event.target.value)}
-          />
-        </label>
-        <button
-          aria-label="Create Group"
-          className="text-action self-end"
-          type="submit"
-        >
-          [save]
-        </button>
+      <form className="border border-border bg-card" onSubmit={handleCreateGroup}>
+        <div className="border-b border-border px-3 py-1 text-xs text-muted-foreground">
+          &gt; add curated group
+        </div>
+        <input
+          aria-label="Group Name"
+          id="admin-group-name"
+          className="w-full bg-transparent px-3 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none"
+          name="groupName"
+          type="text"
+          value={groupNameInput}
+          onChange={(event) => setGroupNameInput(event.target.value)}
+          autoFocus
+        />
       </form>
       {error ? <p>{error}</p> : null}
     </RouteFrame>

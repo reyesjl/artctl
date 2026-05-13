@@ -52,6 +52,14 @@ function normalizeDate(record) {
   return record.objectDate || "Date unknown";
 }
 
+function deriveCuratedGroupSlug(name) {
+  return String(name ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function normalizeSearchResult(record) {
   const imageUrl = record.primaryImageSmall || record.primaryImage || "";
 
@@ -219,7 +227,7 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
       };
     },
 
-    async createAdminCuratedGroup({ slug, name }) {
+    async createAdminCuratedGroup({ name }) {
       if (name === "Homepage Gallery") {
         return {
           error: "Curated group name already exists."
@@ -227,9 +235,24 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
       }
 
       return {
-        slug,
+        slug: deriveCuratedGroupSlug(name),
         name,
         objectCount: 0
+      };
+    },
+
+    async updateAdminCuratedGroup(groupSlug, { name }) {
+      if (groupSlug === "homepage") {
+        return {
+          error: "Homepage Gallery cannot be edited."
+        };
+      }
+
+      return {
+        slug: deriveCuratedGroupSlug(name),
+        name,
+        objectCount: 0,
+        isHomepageFeatured: false
       };
     },
 
@@ -240,6 +263,16 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
         objectCount: 0,
         isHomepageFeatured: true
       };
+    },
+
+    async deleteAdminCuratedGroup(groupSlug) {
+      if (groupSlug === "homepage") {
+        return {
+          error: "Homepage Gallery cannot be deleted."
+        };
+      }
+
+      return true;
     },
 
     async addAdminGalleryItem() {
