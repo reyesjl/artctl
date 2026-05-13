@@ -260,6 +260,37 @@ test("shared navigation hides the admin link when admin auth is configured but n
   expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
 });
 
+test("shared shell opens a full-screen mobile menu from the header toggle", async () => {
+  render(<App fetchImpl={createFetchImpl()} />);
+
+  await screen.findByText("ARTCTL", { selector: ".brand" });
+  fireEvent.click(screen.getByRole("button", { name: "open menu" }));
+
+  const mobileMenu = screen.getByRole("dialog", { name: "mobile navigation" });
+
+  expect(mobileMenu).toBeInTheDocument();
+  expect(within(mobileMenu).getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
+  expect(within(mobileMenu).getByRole("link", { name: "[search]" })).toBeInTheDocument();
+  expect(within(mobileMenu).getByRole("link", { name: "[help]" })).toBeInTheDocument();
+  expect(within(mobileMenu).getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+});
+
+test("shared shell closes the mobile menu after selecting a navigation link", async () => {
+  render(<App fetchImpl={createFetchImpl()} />);
+
+  await screen.findByText("ARTCTL", { selector: ".brand" });
+  fireEvent.click(screen.getByRole("button", { name: "open menu" }));
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "mobile navigation" })).getByRole("link", {
+      name: "[help]"
+    })
+  );
+
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog", { name: "mobile navigation" })).not.toBeInTheDocument();
+  });
+});
+
 test("homepage uses a wider route frame than standard pages", async () => {
   window.history.pushState({}, "", "/");
 

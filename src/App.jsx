@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Menu, X } from "lucide-react";
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AdminPage } from "./pages/AdminPage.jsx";
 import { AdminGalleryPage } from "./pages/AdminGalleryPage.jsx";
@@ -168,10 +169,15 @@ function AppShell({
   onAdminLoggedOut
 }) {
   const location = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const navigation = shell.navigation.filter(
     (item) => item.href !== "/admin" || adminSession.authenticated
   );
   const showAdminLogout = adminSession.authenticated && location.pathname.startsWith("/admin");
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location.pathname]);
 
   async function handleAdminLogout() {
     await fetchImpl(`${apiBaseUrl}/api/admin/logout`, {
@@ -182,38 +188,103 @@ function AppShell({
 
   return (
     <div className="grid min-h-screen grid-rows-[auto_1fr_auto] bg-background font-mono text-foreground">
-      <header className="app-header-strip flex flex-wrap items-center gap-x-4 gap-y-3 bg-background px-4 py-2 text-foreground">
-        <div className="grid gap-1">
-          <strong className="brand text-sm font-bold text-primary">{shell.brand}</strong>
+      <header className="app-header-strip flex items-center justify-between gap-3 bg-background px-4 py-2 text-foreground">
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="grid gap-1">
+            <strong className="brand text-sm font-bold text-primary">{shell.brand}</strong>
+          </div>
+          <nav className="hidden gap-2 text-xs sm:flex" aria-label="Primary">
+            {navigation.map((item) => (
+              <NavLink
+                key={item.href}
+                to={item.href}
+                className={({ isActive }) =>
+                  [
+                    "nav-link inline-flex items-center px-2 py-0.5 transition-colors hover:text-foreground",
+                    isActive ? "bg-primary/10 text-primary" : "text-muted-foreground"
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                }
+              >
+                [{item.label.toLowerCase()}]
+              </NavLink>
+            ))}
+          </nav>
         </div>
-        <nav className="flex flex-wrap gap-2 text-xs" aria-label="Primary">
-          {navigation.map((item) => (
-            <NavLink
-              key={item.href}
-              to={item.href}
-              className={({ isActive }) =>
-                [
-                  "nav-link inline-flex items-center px-2 py-0.5 transition-colors hover:text-foreground",
-                  isActive ? "bg-primary/10 text-primary" : "text-muted-foreground"
-                ]
-                  .filter(Boolean)
-                  .join(" ")
-              }
+        <div className="flex items-center gap-3">
+          {showAdminLogout ? (
+            <button
+              type="button"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              onClick={handleAdminLogout}
             >
-              [{item.label.toLowerCase()}]
-            </NavLink>
-          ))}
-        </nav>
-        {showAdminLogout ? (
+              [logout]
+            </button>
+          ) : null}
           <button
             type="button"
-            className="text-xs text-muted-foreground hover:text-foreground"
-            onClick={handleAdminLogout}
+            aria-label={isMobileMenuOpen ? "close menu" : "open menu"}
+            aria-expanded={isMobileMenuOpen}
+            aria-controls="mobile-navigation"
+            className="text-muted-foreground transition-colors hover:text-foreground sm:hidden"
+            onClick={() => setIsMobileMenuOpen((open) => !open)}
           >
-            [logout]
+            {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
-        ) : null}
+        </div>
       </header>
+      {isMobileMenuOpen ? (
+        <div
+          id="mobile-navigation"
+          role="dialog"
+          aria-modal="true"
+          aria-label="mobile navigation"
+          className="fixed inset-0 z-50 bg-background px-4 py-3 sm:hidden"
+        >
+          <div className="flex items-center justify-between border-b border-border pb-3">
+            <strong className="brand text-sm font-bold text-primary">{shell.brand}</strong>
+            <button
+              type="button"
+              aria-label="close menu"
+              className="text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <nav className="flex flex-col gap-3 py-6 text-lg" aria-label="Primary">
+            {navigation.map((item) => (
+              <NavLink
+                key={item.href}
+                to={item.href}
+                className={({ isActive }) =>
+                  [
+                    "nav-link block py-3 text-center transition-colors hover:text-foreground",
+                    isActive ? "bg-primary/10 text-primary" : "text-muted-foreground"
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                }
+                onClick={() => setIsMobileMenuOpen(false)}
+              >
+                [{item.label.toLowerCase()}]
+              </NavLink>
+            ))}
+          </nav>
+          {showAdminLogout ? (
+            <div className="border-t border-border pt-4 text-center">
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:text-foreground"
+                onClick={handleAdminLogout}
+              >
+                [logout]
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <Routes>
         <Route
           path="/"
