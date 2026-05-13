@@ -108,6 +108,14 @@ const curatedGroupObjectSchemaSql = `
     FOREIGN KEY (object_id) REFERENCES objects(object_id)
   );
 `;
+const artworkSuggestionSchemaSql = `
+  CREATE TABLE IF NOT EXISTS artwork_suggestions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    artist TEXT NOT NULL,
+    work_name TEXT NOT NULL,
+    creditor_name TEXT NOT NULL
+  );
+`;
 const catalogRecordProjectionSql = `
   objects.object_id AS objectID,
   objects.title AS title,
@@ -228,6 +236,7 @@ export function initializeCatalogSqlite(databasePath) {
     database.exec(curatedGalleryItemSchemaSql);
     database.exec(curatedGroupSchemaSql);
     database.exec(curatedGroupObjectSchemaSql);
+    database.exec(artworkSuggestionSchemaSql);
     const curatedGroupColumns = database.prepare("PRAGMA table_info(curated_groups)").all();
     if (!curatedGroupColumns.some((column) => column.name === "is_homepage_featured")) {
       database.exec(
@@ -235,6 +244,74 @@ export function initializeCatalogSqlite(databasePath) {
       );
     }
     ensureHomepageCuratedGroup(database);
+  });
+}
+
+function ensureArtworkSuggestionTable(database) {
+  database.exec(artworkSuggestionSchemaSql);
+}
+
+export function createArtworkSuggestion({
+  databasePath,
+  artist,
+  workName,
+  creditorName = ""
+}) {
+  return withDatabase(databasePath, (database) => {
+    ensureArtworkSuggestionTable(database);
+
+    const result = database
+      .prepare(
+        `
+          INSERT INTO artwork_suggestions (artist, work_name, creditor_name)
+          VALUES (?, ?, ?)
+        `
+      )
+      .run(artist, workName, creditorName);
+
+    return {
+      id: Number(result.lastInsertRowid),
+      artist,
+      workName,
+      creditorName
+    };
+  });
+}
+
+export function listArtworkSuggestions(databasePath) {
+  return withDatabase(databasePath, (database) => {
+    ensureArtworkSuggestionTable(database);
+
+    return database
+      .prepare(
+        `
+          SELECT
+            id,
+            artist,
+            work_name AS workName,
+            creditor_name AS creditorName
+          FROM artwork_suggestions
+          ORDER BY id
+        `
+      )
+      .all();
+  });
+}
+
+export function deleteArtworkSuggestion({ databasePath, id }) {
+  return withDatabase(databasePath, (database) => {
+    ensureArtworkSuggestionTable(database);
+
+    const result = database
+      .prepare(
+        `
+          DELETE FROM artwork_suggestions
+          WHERE id = ?
+        `
+      )
+      .run(id);
+
+    return Number(result.changes ?? 0) > 0;
   });
 }
 
@@ -267,6 +344,7 @@ export function createCatalogSqliteBulkWriter(databasePath) {
   database.exec(curatedGalleryItemSchemaSql);
   database.exec(curatedGroupSchemaSql);
   database.exec(curatedGroupObjectSchemaSql);
+  database.exec(artworkSuggestionSchemaSql);
 
   const insertStatement = database.prepare(`
     INSERT OR REPLACE INTO objects (${objectColumnNames.join(", ")})

@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import httpMocks from "node-mocks-http";
 import { App } from "../src/App.jsx";
@@ -1670,7 +1670,16 @@ test("homepage renders highlighted Met works from Express as gallery links", asy
 
   render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
 
+  const galleryNotice = await screen.findByLabelText("Gallery notice");
+
   expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
+  expect(galleryNotice).toHaveClass("border");
+  expect(galleryNotice).toHaveClass("border-border");
+  expect(
+    screen.getByText("The homepage gallery rotates weekly from a gallery of 400k+ works.")
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[Send to a Friend]" })).toHaveClass("text-xs");
+  expect(screen.getByRole("button", { name: "[Send to a Friend]" })).toHaveClass("text-primary");
   expect(await screen.findByRole("link", { name: /The Great Wave off Kanagawa/i })).toHaveAttribute(
     "href",
     "/works/436121"
@@ -1881,10 +1890,7 @@ test("work route renders details from a configured SQLite catalog path through t
     "src",
     "https://images.metmuseum.org/primary/5046.jpg"
   );
-  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
-    "href",
-    "http://www.metmuseum.org/art/collection/search/5046"
-  );
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
   expect(requests).toContain("/api/works/5046");
 });
 
@@ -2084,6 +2090,152 @@ test("homepage falls back to a placeholder when an artist card image fails to lo
       Boolean(element?.classList.contains("gallery-card-image-placeholder"))
     )
   ).toHaveClass("bg-muted");
+});
+
+test("homepage shares the current gallery page from the weekly rotation notice", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          }
+        ]
+      };
+    }
+  };
+  const share = vi.fn().mockResolvedValue(undefined);
+
+  Object.defineProperty(window.navigator, "share", {
+    configurable: true,
+    value: share
+  });
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "[Send to a Friend]" }));
+
+  await waitFor(() => {
+    expect(share).toHaveBeenCalledWith({
+      title: "ARTCTL",
+      text: "Explore this week’s ARTCTL gallery.",
+      url: window.location.href
+    });
+  });
+});
+
+test("homepage can open the suggestion modal and submit a suggested artwork", async () => {
+  const requests = [];
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "[Suggest Art Work]" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "Suggest Art Work" });
+
+  expect(screen.getByLabelText("Artist")).toBeInTheDocument();
+  expect(screen.getByLabelText("Work Name")).toBeInTheDocument();
+  expect(screen.getByLabelText("Creditor Name")).toBeInTheDocument();
+  expect(dialog.querySelector("form")).toHaveClass("border");
+  expect(dialog.querySelector("form")).toHaveClass("bg-card");
+
+  fireEvent.change(screen.getByLabelText("Artist"), {
+    target: { value: "Hilma af Klint" }
+  });
+  fireEvent.change(screen.getByLabelText("Work Name"), {
+    target: { value: "The Ten Largest, No. 7, Adulthood" }
+  });
+  fireEvent.change(screen.getByLabelText("Creditor Name"), {
+    target: { value: "Jamie" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[submit]" }));
+
+  await waitFor(() => {
+    expect(requests).toContain("POST /api/suggestions");
+  });
+  expect(screen.queryByRole("dialog", { name: "Suggest Art Work" })).not.toBeInTheDocument();
+});
+
+test("admin suggestions route can list and delete submitted artwork suggestions", async () => {
+  const requests = [];
+  const fetchImpl = createFetchImpl({ requestLog: requests });
+
+  await fetchImpl("http://artctl.test/api/suggestions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      artist: "Hilma af Klint",
+      workName: "The Ten Largest, No. 7, Adulthood",
+      creditorName: "Jamie"
+    })
+  });
+
+  window.history.pushState({}, "", "/admin/suggestions");
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Artwork Suggestions" })).toBeInTheDocument();
+  expect(await screen.findByText("Hilma af Klint")).toBeInTheDocument();
+  expect(screen.getByText("The Ten Largest, No. 7, Adulthood")).toBeInTheDocument();
+  expect(screen.getByText("Jamie")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Delete suggestion for The Ten Largest, No. 7, Adulthood" }));
+
+  await waitFor(() => {
+    expect(screen.queryByText("The Ten Largest, No. 7, Adulthood")).not.toBeInTheDocument();
+  });
+  expect(requests).toContain("DELETE /api/admin/suggestions/1");
+});
+
+test("homepage shows a dismissible task notice below the gallery", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const taskNotice = await screen.findByLabelText("Task notice");
+  const taskLink = screen.getByRole("link", { name: "[taskctl.net]" });
+
+  expect(taskNotice).toHaveClass("border");
+  expect(taskNotice).toHaveClass("border-border");
+  expect(screen.getByText("[Related Project]")).toBeInTheDocument();
+  expect(screen.getByText("A minimal task system for overloaded minds.")).toBeInTheDocument();
+  expect(taskLink).toHaveAttribute("href", "https://taskctl.net");
+  expect(taskLink).toHaveAttribute("target", "_blank");
+
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss task notice" }));
+
+  expect(screen.queryByLabelText("Task notice")).not.toBeInTheDocument();
 });
 
 test("homepage shows a friendly message when Express cannot load the Met gallery", async () => {
@@ -2591,7 +2743,8 @@ test("direct entry to a work route loads detail through Express and renders the 
         date: "ca. 1830-32",
         context: "Print - Polychrome woodblock print; ink and color on paper",
         imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
-        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434",
+        isPublicDomain: true
       };
     }
   };
@@ -2615,7 +2768,8 @@ test("work viewer renders the preferred image and compact metadata with a Met li
         date: "ca. 1830-32",
         context: "Print - Polychrome woodblock print; ink and color on paper",
         imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
-        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434",
+        isPublicDomain: true
       };
     }
   };
@@ -2631,10 +2785,7 @@ test("work viewer renders the preferred image and compact metadata with a Met li
   expect(
     screen.getByText("Print - Polychrome woodblock print; ink and color on paper")
   ).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
-    "href",
-    "https://www.metmuseum.org/art/collection/search/45434"
-  );
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
 });
 
 test("mobile work viewer collapses details into a tappable summary row by default", async () => {
@@ -2649,7 +2800,8 @@ test("mobile work viewer collapses details into a tappable summary row by defaul
         date: "ca. 1830-32",
         context: "Print - Polychrome woodblock print; ink and color on paper",
         imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
-        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434",
+        isPublicDomain: true
       };
     }
   };
@@ -2668,15 +2820,12 @@ test("mobile work viewer collapses details into a tappable summary row by defaul
   expect(
     screen.queryByText("Print - Polychrome woodblock print; ink and color on paper")
   ).not.toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "View on the Met" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
 
   fireEvent.click(detailsToggle);
 
   expect(await screen.findByText("Print - Polychrome woodblock print; ink and color on paper")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
-    "href",
-    "https://www.metmuseum.org/art/collection/search/45434"
-  );
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
 });
 
 test("work viewer can request and render ai info for an art student", async () => {
@@ -2959,7 +3108,8 @@ test("direct entry to an image-backed work route shows inspection controls", asy
         date: "ca. 1830-32",
         context: "Print - Polychrome woodblock print; ink and color on paper",
         imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
-        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434",
+        isPublicDomain: true
       };
     }
   };
@@ -3195,7 +3345,7 @@ test("dragging a zoomed work image pans it without displacing the metadata panel
     transform: "translate(28px, 24px) scale(1.5)"
   });
   expect(screen.getByLabelText("Work metadata")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "View on the Met" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
 });
 
 test("mobile work viewer pans a zoomed image with one-finger drag", async () => {
@@ -3388,7 +3538,8 @@ test("work viewer renders a themed layout and metadata panel while preserving wo
         date: "ca. 1830-32",
         context: "Print - Polychrome woodblock print; ink and color on paper",
         imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
-        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434",
+        isPublicDomain: true
       };
     }
   };
@@ -3406,7 +3557,15 @@ test("work viewer renders a themed layout and metadata panel while preserving wo
   expect(metadata).toHaveClass("border-t");
   expect(metadata).toHaveClass("border-border");
   expect(screen.getByText("Artist")).toHaveClass("text-muted-foreground");
-  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveClass("text-primary");
+  expect(screen.getByRole("button", { name: "[Share this Work]" })).toHaveClass("text-xs");
+  expect(screen.getByRole("button", { name: "[Share this Work]" })).toHaveClass("text-primary");
+  expect(screen.getByLabelText("Open Access")).toBeInTheDocument();
+  expect(screen.getByText("Public Domain")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Open Access and Public Domain info" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[Buy a Print]" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "[Buy a Print]" })).toHaveClass("text-primary");
+  expect(screen.queryByText("Coming Soon!")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
   expect(screen.getByText("Japanese")).toBeInTheDocument();
   expect(screen.getByText("ca. 1830-32")).toBeInTheDocument();
 });
@@ -3440,6 +3599,97 @@ test("work viewer preserves image framing inside a themed media surface", async 
   expect(image.parentElement).not.toHaveClass("p-3");
 });
 
+test("work viewer shares the current work link from the metadata panel", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  const share = vi.fn().mockResolvedValue(undefined);
+
+  Object.defineProperty(window.navigator, "share", {
+    configurable: true,
+    value: share
+  });
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "[Share this Work]" }));
+
+  await waitFor(() => {
+    expect(share).toHaveBeenCalledWith({
+      title: "The Great Wave off Kanagawa",
+      text: "Japanese",
+      url: window.location.href
+    });
+  });
+});
+
+test("work viewer opens a coming-soon modal for print purchases", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "[Buy a Print]" }));
+
+  expect(await screen.findByRole("dialog", { name: "Buy a Print" })).toBeInTheDocument();
+  expect(
+    screen.getByText("The ability to purchase prints from here is coming soon!")
+  ).toBeInTheDocument();
+});
+
+test("work viewer explains open access and public domain from the metadata badge", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434",
+        isPublicDomain: true
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Open Access and Public Domain info" }));
+
+  expect(await screen.findByRole("dialog", { name: "Open Access and Public Domain" })).toBeInTheDocument();
+  expect(
+    screen.getByText("Open Access means the Met has made the image available to use.")
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Public domain means the work is free of known copyright restrictions.")
+  ).toBeInTheDocument();
+});
+
 test("work viewer shows a themed unavailable-image state while preserving metadata", async () => {
   const metClient = {
     async getWork(objectId) {
@@ -3450,7 +3700,8 @@ test("work viewer shows a themed unavailable-image state while preserving metada
         date: "1920",
         context: "Color woodcut - Ink and color on paper",
         imageUrl: "",
-        metUrl: "https://www.metmuseum.org/art/collection/search/486055"
+        metUrl: "https://www.metmuseum.org/art/collection/search/486055",
+        isPublicDomain: true
       };
     }
   };
@@ -3471,6 +3722,7 @@ test("work viewer shows a themed unavailable-image state while preserving metada
   expect(screen.queryByRole("button", { name: "Detail mode" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Composition mode" })).not.toBeInTheDocument();
   expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
+  expect(screen.queryByText("Public Domain")).not.toBeInTheDocument();
 });
 
 test("work viewer shows metadata when the Met API has no image for the object", async () => {
@@ -3495,10 +3747,7 @@ test("work viewer shows metadata when the Met API has no image for the object", 
   expect(screen.getByText("Image unavailable through the Met API.")).toBeInTheDocument();
   expect(screen.queryByRole("img", { name: "Galisteo Creek" })).not.toBeInTheDocument();
   expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
-    "href",
-    "https://www.metmuseum.org/art/collection/search/486055"
-  );
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
 });
 
 test("mobile work viewer auto-opens details when no image is available", async () => {
@@ -3524,10 +3773,7 @@ test("mobile work viewer auto-opens details when no image is available", async (
   expect(await screen.findByRole("heading", { name: "Galisteo Creek" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Hide work details" })).toBeInTheDocument();
   expect(screen.getByText("Color woodcut - Ink and color on paper")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
-    "href",
-    "https://www.metmuseum.org/art/collection/search/486055"
-  );
+  expect(screen.queryByRole("link", { name: "[View on the Met]" })).not.toBeInTheDocument();
 });
 
 test("work viewer renders an empty state when Express cannot load the object", async () => {

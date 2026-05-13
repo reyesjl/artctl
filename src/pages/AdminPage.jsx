@@ -16,6 +16,14 @@ export function AdminPage() {
             Manage editorial groups and homepage curation.
           </p>
         </li>
+        <li className="grid gap-1">
+          <Link to="/admin/suggestions" className="text-action">
+            [artwork suggestions]
+          </Link>
+          <p className="text-sm text-muted-foreground">
+            Read and delete submitted artwork suggestions.
+          </p>
+        </li>
       </ul>
     </RouteFrame>
   );

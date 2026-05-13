@@ -5,7 +5,12 @@ import express from "express";
 import { createMetApiClient } from "./met-api.js";
 import { MetHydrationAbortError, runCatalogHydration } from "./catalog-hydrate.js";
 import { createRuntimeCatalog, createUninitializedCatalog } from "./catalog.js";
-import { getObjectHydrationState } from "./catalog-sqlite.js";
+import {
+  createArtworkSuggestion,
+  deleteArtworkSuggestion,
+  getObjectHydrationState,
+  listArtworkSuggestions
+} from "./catalog-sqlite.js";
 import { loadCuratedArtistIndex } from "./curated-gallery.js";
 import { curatedGalleryRecords } from "./curated-gallery-records.js";
 
@@ -106,6 +111,7 @@ export function createArtctlApp(options = {}) {
   const catalog = Object.hasOwn(options, "catalog") ? (options.catalog ?? null) : defaultCatalog;
   const app = express();
   const adminSessions = new Set();
+  const artworkSuggestions = [];
   const adminAuthEnabled = Boolean(effectiveAdminAuth?.username && effectiveAdminAuth?.password);
 
   app.set("artctlTestDefaultAdminAuth", !adminAuthProvided && process.env.NODE_ENV === "test");
@@ -189,6 +195,43 @@ export function createArtctlApp(options = {}) {
     });
   });
 
+  app.post("/api/suggestions", (request, response) => {
+    const artist = String(request.body?.artist ?? "").trim();
+    const workName = String(request.body?.workName ?? "").trim();
+    const creditorName = String(request.body?.creditorName ?? "").trim();
+
+    if (!artist || !workName) {
+      response.status(400).json({
+        error: "Artist and work name are required."
+      });
+      return;
+    }
+
+    const suggestion = {
+      id: artworkSuggestions.length + 1,
+      artist,
+      workName,
+      creditorName
+    };
+
+    if (catalogDatabasePath) {
+      response.status(201).json({
+        suggestion: createArtworkSuggestion({
+          databasePath: catalogDatabasePath,
+          artist,
+          workName,
+          creditorName
+        })
+      });
+      return;
+    }
+
+    artworkSuggestions.push(suggestion);
+    response.status(201).json({
+      suggestion
+    });
+  });
+
   app.post("/api/admin/login", (request, response) => {
     if (!adminAuthEnabled) {
       response.status(501).json({
@@ -239,6 +282,46 @@ export function createArtctlApp(options = {}) {
   });
 
   app.use("/api/admin", requireAdminAuth);
+
+  app.get("/api/admin/suggestions", (_request, response) => {
+    response.json({
+      results: catalogDatabasePath ? listArtworkSuggestions(catalogDatabasePath) : artworkSuggestions
+    });
+  });
+
+  app.delete("/api/admin/suggestions/:id", (request, response) => {
+    const id = Number.parseInt(request.params.id, 10);
+
+    if (catalogDatabasePath) {
+      const deleted = deleteArtworkSuggestion({ databasePath: catalogDatabasePath, id });
+
+      if (!deleted) {
+        response.status(404).json({
+          error: "Artwork suggestion not found."
+        });
+        return;
+      }
+
+      response.json({
+        ok: true
+      });
+      return;
+    }
+
+    const suggestionIndex = artworkSuggestions.findIndex((suggestion) => suggestion.id === id);
+
+    if (suggestionIndex < 0) {
+      response.status(404).json({
+        error: "Artwork suggestion not found."
+      });
+      return;
+    }
+
+    artworkSuggestions.splice(suggestionIndex, 1);
+    response.json({
+      ok: true
+    });
+  });
 
   app.get("/api/search", async (request, response) => {
     if (!ensureCatalogReady(response, catalog)) {

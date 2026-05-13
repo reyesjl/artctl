@@ -92,7 +92,8 @@ function normalizeWorkDetail(record) {
     date: normalizeDate(record),
     context: normalizeContext(record),
     imageUrl: record.primaryImage || record.primaryImageSmall || "",
-    metUrl: record.objectURL || `https://www.metmuseum.org/art/collection/search/${record.objectID}`
+    metUrl: record.objectURL || `https://www.metmuseum.org/art/collection/search/${record.objectID}`,
+    isPublicDomain: Boolean(record.isPublicDomain)
   };
 }
 

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { Info, Receipt, Share2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { BrailleNoiseStream } from "../components/BrailleNoiseStream.jsx";
 import { RouteFrame } from "../components/RouteFrame.jsx";
+import { shareCurrentPage } from "../lib/share.js";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
@@ -101,6 +102,8 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [aiInfoStatus, setAiInfoStatus] = useState("idle");
   const [isStudyOverlayVisible, setIsStudyOverlayVisible] = useState(false);
   const [isStudyOverlayExpanded, setIsStudyOverlayExpanded] = useState(true);
+  const [isOpenAccessInfoVisible, setIsOpenAccessInfoVisible] = useState(false);
+  const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
   const [isMobileDetailsExpanded, setIsMobileDetailsExpanded] = useState(false);
   const [scale, setScale] = useState(MIN_SCALE);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -154,6 +157,8 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     setAiInfoStatus("idle");
     setIsStudyOverlayVisible(false);
     setIsStudyOverlayExpanded(true);
+    setIsOpenAccessInfoVisible(false);
+    setIsPrintModalVisible(false);
     setIsMobileDetailsExpanded(false);
     dragStateRef.current = null;
     lastTapAtRef.current = 0;
@@ -711,20 +716,127 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                       <dd className="m-0">{work.context}</dd>
                     </div>
                   </dl>
-                  <a
-                    href={work.metUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                  {work.imageUrl && work.isPublicDomain ? (
+                    <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                      <span
+                        aria-label="Open Access"
+                        className="inline-flex h-5 w-5 items-center justify-center border border-border text-[10px] text-foreground"
+                      >
+                        OA
+                      </span>
+                      <span>Public Domain</span>
+                      <button
+                        type="button"
+                        aria-label="Open Access and Public Domain info"
+                        className="inline-flex items-center text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setIsOpenAccessInfoVisible(true);
+                        }}
+                      >
+                        <Info className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
                     className="inline-flex items-center gap-1 text-xs text-primary"
+                    onClick={() => {
+                      void shareCurrentPage({
+                        title: work.title,
+                        text: work.artist
+                      });
+                    }}
                   >
-                    <span>View on the Met</span>
-                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                  </a>
+                    <span>[Share this Work]</span>
+                    <Share2 className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="[Buy a Print]"
+                    className="inline-flex items-center gap-1 text-xs text-primary"
+                    onClick={() => {
+                      setIsPrintModalVisible(true);
+                    }}
+                  >
+                    <span>[Buy a Print]</span>
+                    <Receipt className="h-4 w-4" aria-hidden="true" />
+                  </button>
                 </>
               ) : null}
             </section>
           </div>
         </div>
+      ) : null}
+      {isPrintModalVisible ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close print modal backdrop"
+            className="fixed inset-0 z-40 bg-background/60"
+            onClick={() => {
+              setIsPrintModalVisible(false);
+            }}
+          />
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Buy a Print"
+            className="fixed inset-x-3 top-20 z-50 mx-auto w-full max-w-md border border-border bg-card px-4 py-4 text-sm text-card-foreground shadow-2xl"
+          >
+            <div className="grid gap-3">
+              <p className="m-0">The ability to purchase prints from here is coming soon!</p>
+              <div>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setIsPrintModalVisible(false);
+                  }}
+                >
+                  [close]
+                </button>
+              </div>
+            </div>
+          </section>
+        </>
+      ) : null}
+      {isOpenAccessInfoVisible ? (
+        <>
+          <button
+            type="button"
+            aria-label="Close open access info backdrop"
+            className="fixed inset-0 z-40 bg-background/60"
+            onClick={() => {
+              setIsOpenAccessInfoVisible(false);
+            }}
+          />
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Open Access and Public Domain"
+            className="fixed inset-x-3 top-20 z-50 mx-auto w-full max-w-md border border-border bg-card px-4 py-4 text-sm text-card-foreground shadow-2xl"
+          >
+            <div className="grid gap-3">
+              <p className="m-0">
+                Open Access means the Met has made the image available to use.
+              </p>
+              <p className="m-0">
+                Public domain means the work is free of known copyright restrictions.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => {
+                    setIsOpenAccessInfoVisible(false);
+                  }}
+                >
+                  [close]
+                </button>
+              </div>
+            </div>
+          </section>
+        </>
       ) : null}
       {isStudyOverlayVisible && isMobileLayout ? (
         <>

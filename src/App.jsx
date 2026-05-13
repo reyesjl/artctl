@@ -3,6 +3,7 @@ import { Menu, X } from "lucide-react";
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AdminPage } from "./pages/AdminPage.jsx";
 import { AdminGalleryPage } from "./pages/AdminGalleryPage.jsx";
+import { AdminSuggestionsPage } from "./pages/AdminSuggestionsPage.jsx";
 import { CreateCuratedGroupPage } from "./pages/CreateCuratedGroupPage.jsx";
 import { CuratedGroupsPage } from "./pages/CuratedGroupsPage.jsx";
 import { HelpPage } from "./pages/HelpPage.jsx";
@@ -347,6 +348,19 @@ function AppShell({
               isAdminAuthenticated={adminSession.authenticated}
             >
               <AdminGalleryPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/suggestions"
+          element={
+            <AdminRoute
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              onAuthenticated={onAdminAuthenticated}
+              isAdminAuthenticated={adminSession.authenticated}
+            >
+              <AdminSuggestionsPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />
             </AdminRoute>
           }
         />

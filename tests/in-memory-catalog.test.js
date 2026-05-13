@@ -179,7 +179,8 @@ describe("in-memory catalog", () => {
           medium: "Polychrome woodblock print; ink and color on paper",
           primaryImage: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
           primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg",
-          objectURL: "https://www.metmuseum.org/art/collection/search/45434"
+          objectURL: "https://www.metmuseum.org/art/collection/search/45434",
+          isPublicDomain: true
         }
       ]
     });
@@ -191,7 +192,8 @@ describe("in-memory catalog", () => {
       date: "ca. 1830-32",
       context: "Print - Polychrome woodblock print; ink and color on paper",
       imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
-      metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      metUrl: "https://www.metmuseum.org/art/collection/search/45434",
+      isPublicDomain: true
     });
   });
 

@@ -223,6 +223,75 @@ describe("configured SQLite catalog runtime", () => {
     });
   });
 
+  test("POST /api/suggestions persists suggestions in SQLite so a fresh app instance can list and delete them", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-suggestions-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const createSuggestionApp = () =>
+      createArtctlApp({
+        catalogDatabasePath: databasePath,
+        adminAuth: {
+          username: "admin",
+          password: "secret"
+        }
+      });
+
+    const createResponse = await makeRequest("/api/suggestions", createSuggestionApp(), {
+      method: "POST",
+      body: {
+        artist: "Hilma af Klint",
+        workName: "The Ten Largest, No. 7, Adulthood",
+        creditorName: "Jamie"
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(JSON.parse(createResponse._getData())).toEqual({
+      suggestion: {
+        id: 1,
+        artist: "Hilma af Klint",
+        workName: "The Ten Largest, No. 7, Adulthood",
+        creditorName: "Jamie"
+      }
+    });
+
+    const listResponse = await makeAdminRequest("/api/admin/suggestions", createSuggestionApp());
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(JSON.parse(listResponse._getData())).toEqual({
+      results: [
+        {
+          id: 1,
+          artist: "Hilma af Klint",
+          workName: "The Ten Largest, No. 7, Adulthood",
+          creditorName: "Jamie"
+        }
+      ]
+    });
+
+    const deleteResponse = await makeAdminRequest(
+      "/api/admin/suggestions/1",
+      createSuggestionApp(),
+      {
+      method: "DELETE"
+      }
+    );
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(JSON.parse(deleteResponse._getData())).toEqual({
+      ok: true
+    });
+
+    const emptyListResponse = await makeAdminRequest(
+      "/api/admin/suggestions",
+      createSuggestionApp()
+    );
+
+    expect(emptyListResponse.statusCode).toBe(200);
+    expect(JSON.parse(emptyListResponse._getData())).toEqual({
+      results: []
+    });
+  });
+
   test("GET /api/search serves local catalog results from a configured SQLite database path", async () => {
     const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
     const databasePath = path.join(tempDir, "catalog.sqlite");
@@ -1370,7 +1439,8 @@ describe("work detail API", () => {
       date: "1845–57",
       context: "Medal - Bronze",
       imageUrl: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
-      metUrl: "http://www.metmuseum.org/art/collection/search/5046"
+      metUrl: "http://www.metmuseum.org/art/collection/search/5046",
+      isPublicDomain: true
     });
     expect(secondResponse.statusCode).toBe(200);
     expect(JSON.parse(secondResponse._getData()).imageUrl).toBe(
