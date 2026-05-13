@@ -7,7 +7,8 @@ const HELP_SECTIONS = [
   { id: "search", title: "SEARCH" },
   { id: "system-design", title: "SYSTEM DESIGN" },
   { id: "themes", title: "THEMES" },
-  { id: "collection-source", title: "COLLECTION SOURCE" }
+  { id: "collection-source", title: "COLLECTION SOURCE" },
+  { id: "about-me", title: "ABOUT ME" }
 ];
 
 const WHY_POINTS = [
@@ -296,6 +297,36 @@ export function HelpPage() {
             </p>
             <p className="text-xs text-muted-foreground">
               Only public-domain works with available imagery are displayed.
+            </p>
+          </HelpSection>
+
+          <HelpSection id="about-me" title="ABOUT ME">
+            <p className="text-xs text-muted-foreground">
+              I am a software engineer with 10+ years of experience in
+              full-stack work.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              In the age of AI, I still enjoy the fundamental aspects of
+              software engineering and believe they are more important now than
+              ever before.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              I built ARTCTL with a terminal UI to show that simple things done
+              really well can make for good software and be useful and make
+              people happy.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              ARTCTL is one of a few side projects I have been working on. You
+              can also see{" "}
+              <a
+                href="https://taskctl.net"
+                target="_blank"
+                rel="noreferrer"
+                className="text-foreground"
+              >
+                taskctl.net
+              </a>
+              .
             </p>
           </HelpSection>
 

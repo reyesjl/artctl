@@ -3579,6 +3579,10 @@ test("help route presents the current ARTCTL product copy", async () => {
   expect(
     within(helpPage).getByText(/metropolitan museum open access collection api/i)
   ).toBeInTheDocument();
+  expect(within(helpPage).getByText("── ABOUT ME ──")).toBeInTheDocument();
+  expect(within(helpPage).getByText(/software engineer with 10\+ years of experience in full-stack work\./i)).toBeInTheDocument();
+  expect(within(helpPage).getByText(/simple things done really well can make for good software and be useful and make people happy\./i)).toBeInTheDocument();
+  expect(within(helpPage).getByRole("link", { name: /taskctl\.net/i })).toHaveAttribute("href", "https://taskctl.net");
 });
 
 test("help route renders a clickable section index with hash links", async () => {
@@ -3590,10 +3594,12 @@ test("help route renders a clickable section index with hash links", async () =>
   const sectionNav = screen.getByRole("navigation", { name: "help sections" });
   const studyLink = screen.getByRole("link", { name: "[study works]" });
   const sourceLink = screen.getByRole("link", { name: "[collection source]" });
+  const aboutLink = screen.getByRole("link", { name: "[about me]" });
 
   expect(sectionNav).toBeInTheDocument();
   expect(studyLink).toHaveAttribute("href", "#study-works");
   expect(sourceLink).toHaveAttribute("href", "#collection-source");
+  expect(aboutLink).toHaveAttribute("href", "#about-me");
 });
 
 test("help route renders the manual copy on the shared background", async () => {
