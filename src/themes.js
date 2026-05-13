@@ -352,7 +352,7 @@ export const THEMES = [
   }
 ];
 
-export const DEFAULT_THEME_ID = "dark-green";
+export const DEFAULT_THEME_ID = "dark-orange";
 
 export function applyTheme(theme) {
   const root = document.documentElement;

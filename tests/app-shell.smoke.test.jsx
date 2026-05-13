@@ -275,8 +275,8 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(screen.queryByText("[ARTCTL]")).not.toBeInTheDocument();
   expect(screen.queryByText("Met collection terminal viewer")).not.toBeInTheDocument();
-  expect(window.localStorage.getItem("artctl-theme")).toBe("dark-green");
-  expect(document.documentElement.style.getPropertyValue("--background")).toBe("220 20% 4%");
+  expect(window.localStorage.getItem("artctl-theme")).toBe("dark-orange");
+  expect(document.documentElement.style.getPropertyValue("--background")).toBe("25 30% 5%");
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
@@ -3902,7 +3902,7 @@ test("theme route matches the Cortex-style theme picker structure and active sta
   expect(screen.getByRole("button", { name: "CRT Amber" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Solarized" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Sepia" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Dark Green" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("button", { name: "Dark Orange" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getAllByText("✓")).toHaveLength(1);
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
@@ -3918,20 +3918,20 @@ test("theme route renders a themed picker surface while preserving theme selecti
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const darkGreen = await screen.findByRole("button", { name: "Dark Green" });
+  const darkOrange = await screen.findByRole("button", { name: "Dark Orange" });
   const solarized = screen.getByRole("button", { name: "Solarized" });
-  const darkGreenSwatches = darkGreen.querySelectorAll(".theme-option-swatch");
+  const darkOrangeSwatches = darkOrange.querySelectorAll(".theme-option-swatch");
 
-  expect(darkGreen).toHaveClass("bg-primary/10");
-  expect(darkGreen).toHaveClass("border-primary");
-  expect(darkGreen).toHaveClass("text-primary");
-  expect(darkGreen).toHaveClass("font-mono");
-  expect(darkGreen).toHaveClass("text-xs");
-  expect(darkGreen).toHaveClass("appearance-none");
-  expect(darkGreen).toHaveClass("border-solid");
-  expect(darkGreen).toHaveClass("shadow-none");
-  expect(darkGreenSwatches).toHaveLength(2);
-  for (const swatch of darkGreenSwatches) {
+  expect(darkOrange).toHaveClass("bg-primary/10");
+  expect(darkOrange).toHaveClass("border-primary");
+  expect(darkOrange).toHaveClass("text-primary");
+  expect(darkOrange).toHaveClass("font-mono");
+  expect(darkOrange).toHaveClass("text-xs");
+  expect(darkOrange).toHaveClass("appearance-none");
+  expect(darkOrange).toHaveClass("border-solid");
+  expect(darkOrange).toHaveClass("shadow-none");
+  expect(darkOrangeSwatches).toHaveLength(2);
+  for (const swatch of darkOrangeSwatches) {
     expect(swatch).toHaveClass("border");
     expect(swatch).toHaveClass("border-border");
     expect(swatch).toHaveClass("border-solid");
