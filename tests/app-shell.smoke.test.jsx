@@ -220,7 +220,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("v0.1.0").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.0").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -233,6 +233,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(nav).not.toHaveClass("border-b");
   expect(footer).toHaveClass("app-footer-strip");
   expect(footer).not.toHaveClass("border-t");
+  expect(footer).toHaveClass("text-[10px]");
   expect(galleryLink).not.toHaveClass("border-b");
   expect(screen.getByText("ARTCTL", { selector: ".brand" })).toHaveClass("text-sm");
   expect(screen.getByText("ARTCTL", { selector: ".brand" })).toHaveClass("font-bold");
@@ -518,7 +519,7 @@ test("curated groups route renders a selectable text list of groups", async () =
   render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByRole("heading", { name: "Curated Groups" })).toBeInTheDocument();
-  expect(requests).toContain("/api/admin/curated-groups");
+  expect(requests.some((request) => request.includes("/api/admin/curated-groups"))).toBe(true);
   expect(await screen.findByRole("link", { name: "Homepage Gallery" })).toHaveAttribute(
     "href",
     "/admin/curated-groups/homepage"
@@ -1368,7 +1369,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("v0.1.0")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.0")).toBeInTheDocument();
 });
 
 test("search route reveals terminal-style department and media pickers from the action strip", async () => {
@@ -1743,6 +1744,22 @@ test("work route renders details from a configured SQLite catalog path through t
   const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
   const databasePath = path.join(tempDir, "catalog.sqlite");
   const requests = [];
+  const hydrationFetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    headers: {
+      get(name) {
+        return name.toLowerCase() === "content-type" ? "application/json" : null;
+      }
+    },
+    async json() {
+      return {
+        objectID: 5046,
+        primaryImage: "https://images.metmuseum.org/primary/5046.jpg",
+        primaryImageSmall: "https://images.metmuseum.org/small/5046.jpg"
+      };
+    }
+  });
 
   expect(
     runCatalogImport({
@@ -1754,14 +1771,23 @@ test("work route renders details from a configured SQLite catalog path through t
   window.history.pushState({}, "", "/works/5046");
 
   render(
-    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+    <App
+      fetchImpl={createFetchImpl({
+        requestLog: requests,
+        catalogDatabasePath: databasePath,
+        hydrationFetchImpl
+      })}
+    />
   );
 
   expect(await screen.findByRole("heading", { name: 'The "Shipwreck Medal"' })).toBeInTheDocument();
   expect(screen.getByText("Salathiel Ellis")).toBeInTheDocument();
   expect(screen.getByText("1845–57")).toBeInTheDocument();
   expect(screen.getByText("Medal - Bronze")).toBeInTheDocument();
-  expect(screen.getByText("Image unavailable through the Met API.")).toBeInTheDocument();
+  expect(screen.getByRole("img", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
+    "src",
+    "https://images.metmuseum.org/primary/5046.jpg"
+  );
   expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
     "href",
     "http://www.metmuseum.org/art/collection/search/5046"
@@ -3175,7 +3201,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("v0.1.0")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.0")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 
@@ -3185,6 +3211,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
   expect(footer).not.toHaveClass("bg-card");
   expect(footer).toHaveClass("app-footer-strip");
   expect(footer).not.toHaveClass("border-t");
+  expect(footer).toHaveClass("text-[10px]");
   expect(footer).toHaveClass("text-muted-foreground");
 });
 

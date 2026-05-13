@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "vitest";
@@ -116,14 +116,20 @@ describe("catalog import", () => {
     });
   });
 
-  test("importCatalogCsvFile imports a real subset extracted from MetObjects.csv", () => {
+  test("importCatalogCsvFile imports a compact MetObjects-derived subset fixture without requiring the full dataset", () => {
     const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-import-"));
     const csvPath = path.join(tempDir, "metobjects-subset.csv");
-    const metObjectsCsv = readFileSync(path.resolve("metropolitan/MetObjects.csv"), "utf8");
-    const subsetCsv =
-      metObjectsCsv.split(/\r?\n/).slice(0, 4).join("\n") + "\n";
 
-    writeFileSync(csvPath, subsetCsv, "utf8");
+    writeFileSync(
+      csvPath,
+      [
+        "Object ID,Department,Title,Artist Display Name,Object Date,Is Public Domain",
+        '1,The American Wing,"One-dollar Liberty Head Coin",James Barton Longacre,1853–89,False',
+        '2,The American Wing,"Ten-dollar Liberty Head Coin",Christian Gobrecht,1901,False',
+        '3,The American Wing,"Two-and-a-Half Dollar Coin",,1909–27,False'
+      ].join("\n") + "\n",
+      "utf8"
+    );
 
     expect(importCatalogCsvFile(csvPath)).toEqual({
       records: [

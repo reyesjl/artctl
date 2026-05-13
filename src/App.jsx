@@ -282,8 +282,8 @@ function AppShell({
         <Route path="/help" element={<HelpPage />} />
         <Route path="/theme" element={<ThemesPage />} />
       </Routes>
-      <footer className="app-footer-strip bg-background px-4 py-3 text-center text-xs text-muted-foreground">
-        v0.1.0
+      <footer className="app-footer-strip bg-background px-4 py-3 text-center text-[10px] text-muted-foreground">
+        ARTCTL v1.0
       </footer>
     </div>
   );

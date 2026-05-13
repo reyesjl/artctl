@@ -20,6 +20,19 @@ function createWritableBuffer() {
   };
 }
 
+function spawnNodeWithoutWarnings(commandPath, args, options = {}) {
+  return spawnSync("node", [commandPath, ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    ...options,
+    env: {
+      ...process.env,
+      NODE_NO_WARNINGS: "1",
+      ...(options.env ?? {})
+    }
+  });
+}
+
 describe("catalog hydrate command", () => {
   test("runCatalogHydrationCommand reads argv, writes the report, and sets exitCode", async () => {
     const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-hydrate-command-"));
@@ -97,11 +110,8 @@ describe("catalog hydrate command", () => {
 
     expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
 
-    const result = spawnSync("node", [commandPath, databasePath, "--limit", "1", "--object-id", "5046"], {
-      cwd: process.cwd(),
-      encoding: "utf8",
+    const result = spawnNodeWithoutWarnings(commandPath, [databasePath, "--limit", "1", "--object-id", "5046"], {
       env: {
-        ...process.env,
         ARTCTL_FAKE_MET_OBJECT_5046: JSON.stringify({
           objectID: 5046,
           primaryImage: "https://images.metmuseum.org/primary/5046.jpg",

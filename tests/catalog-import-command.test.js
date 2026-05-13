@@ -20,6 +20,19 @@ function createWritableBuffer() {
   };
 }
 
+function spawnNodeWithoutWarnings(commandPath, args, options = {}) {
+  return spawnSync("node", [commandPath, ...args], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    ...options,
+    env: {
+      ...process.env,
+      NODE_NO_WARNINGS: "1",
+      ...(options.env ?? {})
+    }
+  });
+}
+
 describe("catalog import command", () => {
   test("runCatalogImportCommand reads argv, writes the report, and sets exitCode", async () => {
     const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-import-command-"));
@@ -84,11 +97,8 @@ describe("catalog import command", () => {
       "utf8"
     );
 
-    const result = spawnSync("node", [commandPath, csvPath], {
-      cwd: process.cwd(),
-      encoding: "utf8",
+    const result = spawnNodeWithoutWarnings(commandPath, [csvPath], {
       env: {
-        ...process.env,
         ARTCTL_ENV_FILE_PATH: missingEnvFilePath
       }
     });
@@ -124,11 +134,8 @@ describe("catalog import command", () => {
     const missingEnvFilePath = path.join(tempDir, "missing.env.local");
     const commandPath = path.resolve("server/catalog-import-command.js");
 
-    const result = spawnSync("node", [commandPath, csvPath], {
-      cwd: process.cwd(),
-      encoding: "utf8",
+    const result = spawnNodeWithoutWarnings(commandPath, [csvPath], {
       env: {
-        ...process.env,
         ARTCTL_ENV_FILE_PATH: missingEnvFilePath
       }
     });
@@ -259,10 +266,7 @@ describe("catalog import command", () => {
     const databasePath = path.join(tempDir, "catalog.sqlite");
     const commandPath = path.resolve("server/catalog-import-command.js");
 
-    const result = spawnSync("node", [commandPath, csvPath, databasePath], {
-      cwd: process.cwd(),
-      encoding: "utf8"
-    });
+    const result = spawnNodeWithoutWarnings(commandPath, [csvPath, databasePath]);
 
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({
@@ -302,10 +306,7 @@ describe("catalog import command", () => {
     const databasePath = path.join(tempDir, "missing", "catalog.sqlite");
     const commandPath = path.resolve("server/catalog-import-command.js");
 
-    const result = spawnSync("node", [commandPath, csvPath, databasePath], {
-      cwd: process.cwd(),
-      encoding: "utf8"
-    });
+    const result = spawnNodeWithoutWarnings(commandPath, [csvPath, databasePath]);
 
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
