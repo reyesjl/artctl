@@ -397,10 +397,10 @@ test.each([
 
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  expect(screen.getAllByRole("link", { name: "[gallery]" }).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole("link", { name: "[search]" }).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole("link", { name: "[help]" }).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole("link", { name: "[theme]" }).length).toBeGreaterThan(0);
   if (route.startsWith("/admin")) {
     expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
   } else {
@@ -3548,29 +3548,52 @@ test("help route presents the current ARTCTL product copy", async () => {
   render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByRole("heading", { name: "Help" })).toBeInTheDocument();
-  expect(screen.getByText("ARTCTL", { selector: ".help-page-manual" })).toBeInTheDocument();
-  expect(screen.getByText("Public-domain artwork explorer")).toBeInTheDocument();
-  expect(screen.getByText("── Gallery ──")).toBeInTheDocument();
+  const helpPage = screen.getByText("ARTCTL", { selector: ".help-page-manual" }).closest("article");
+
+  expect(helpPage).not.toBeNull();
+  expect(within(helpPage).getByText("ARTCTL", { selector: ".help-page-manual" })).toBeInTheDocument();
+  expect(within(helpPage).getByText("Quiet software for studying public-domain art.")).toBeInTheDocument();
+  expect(within(helpPage).getByText("── WHY ARTCTL EXISTS ──")).toBeInTheDocument();
   expect(
-    screen.getByText(/browse highlighted public-domain artworks in a quiet, minimal interface/i)
+    within(helpPage).getByText(/artctl combines curated galleries, structured observation, and machine-assisted interpretation/i)
   ).toBeInTheDocument();
-  expect(screen.getByText(/sunflowers · armor · monet · ukiyo-e · cats/i)).toBeInTheDocument();
-  expect(screen.getByText("── Search ──")).toBeInTheDocument();
+  expect(within(helpPage).getByText(/visual analysis/i)).toBeInTheDocument();
+  expect(within(helpPage).getByText(/deliberate exploration instead of algorithmic feeds/i)).toBeInTheDocument();
+  expect(within(helpPage).getByText("── STUDY WORKS ──")).toBeInTheDocument();
+  expect(within(helpPage).getByText("[study it]")).toBeInTheDocument();
+  expect(within(helpPage).getByText(/machine observation is not connoisseurship\./i)).toBeInTheDocument();
+  expect(within(helpPage).getByText("── CURATED GALLERY ──")).toBeInTheDocument();
+  expect(within(helpPage).getByText(/future plans include guest-curated collections/i)).toBeInTheDocument();
+  expect(within(helpPage).getByText("── SEARCH ──")).toBeInTheDocument();
+  expect(within(helpPage).getByText(/search across 400,000\+ public-domain works indexed from museum collection data\./i)).toBeInTheDocument();
+  expect(within(helpPage).getByText(/goya/i)).toBeInTheDocument();
+  expect(within(helpPage).getByText("── SYSTEM DESIGN ──")).toBeInTheDocument();
   expect(
-    screen.getByText(/search across artists, titles, cultures, materials, periods/i)
+    within(helpPage).getByText(/artctl maintains a local collection database built from museum object data exports\./i)
   ).toBeInTheDocument();
-  expect(screen.getByText("── Help ──")).toBeInTheDocument();
+  expect(within(helpPage).getByText("── THEMES ──")).toBeInTheDocument();
   expect(
-    screen.getByText(/artctl is designed as a lightweight artwork browser inspired by terminal systems/i)
+    within(helpPage).getByText(/terminal systems/i)
   ).toBeInTheDocument();
-  expect(screen.getByText("── Themes ──")).toBeInTheDocument();
+  expect(within(helpPage).getByText("── COLLECTION SOURCE ──")).toBeInTheDocument();
   expect(
-    screen.getByText(/your selected theme persists across gallery, search, help, and artwork views/i)
+    within(helpPage).getByText(/metropolitan museum open access collection api/i)
   ).toBeInTheDocument();
-  expect(screen.getByText("── Collection Source ──")).toBeInTheDocument();
-  expect(
-    screen.getByText(/the current collection source is the metropolitan museum open access api/i)
-  ).toBeInTheDocument();
+});
+
+test("help route renders a clickable section index with hash links", async () => {
+  window.history.pushState({}, "", "/help");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  await screen.findByRole("heading", { name: "Help" });
+  const sectionNav = screen.getByRole("navigation", { name: "help sections" });
+  const studyLink = screen.getByRole("link", { name: "[study works]" });
+  const sourceLink = screen.getByRole("link", { name: "[collection source]" });
+
+  expect(sectionNav).toBeInTheDocument();
+  expect(studyLink).toHaveAttribute("href", "#study-works");
+  expect(sourceLink).toHaveAttribute("href", "#collection-source");
 });
 
 test("help route renders the manual copy on the shared background", async () => {
@@ -3581,14 +3604,27 @@ test("help route renders the manual copy on the shared background", async () => 
   await screen.findByRole("heading", { name: "Help" });
   const manual = screen.getByText("ARTCTL", { selector: ".help-page-manual" });
   const helpPage = manual.closest("article");
-  const galleryTitle = screen.getByText("── Gallery ──");
+  const firstSectionTitle = within(helpPage).getByText("── WHY ARTCTL EXISTS ──");
 
   expect(helpPage).not.toHaveClass("bg-card");
   expect(helpPage).not.toHaveClass("border-border");
-  expect(galleryTitle).toHaveClass("text-primary");
+  expect(firstSectionTitle).toHaveClass("text-primary");
   expect(
-    screen.getByText(/your selected theme persists across gallery, search, help, and artwork views/i)
+    screen.getByText(/theme state persists across the application\./i)
   ).toBeInTheDocument();
+});
+
+test("help route includes a trailing scroll spacer for late section anchors", async () => {
+  window.history.pushState({}, "", "/help");
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  await screen.findByRole("heading", { name: "Help" });
+  const helpPage = screen.getByText("ARTCTL", { selector: ".help-page-manual" }).closest("article");
+  const spacer = helpPage.querySelector(".help-scroll-spacer");
+
+  expect(spacer).toHaveAttribute("aria-hidden", "true");
+  expect(spacer).toHaveClass("h-screen");
 });
 
 test("theme route matches the Cortex-style theme picker structure and active state", async () => {
