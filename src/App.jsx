@@ -368,7 +368,7 @@ function AppShell({
         <Route path="/theme" element={<ThemesPage />} />
       </Routes>
       <footer className="app-footer-strip bg-background px-4 py-3 text-center text-[10px] text-muted-foreground">
-        ARTCTL v1.3
+        ARTCTL v1.4
       </footer>
     </div>
   );

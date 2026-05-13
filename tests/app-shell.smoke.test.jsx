@@ -282,7 +282,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("ARTCTL v1.3").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.4").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -1462,7 +1462,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("ARTCTL v1.3")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.4")).toBeInTheDocument();
 });
 
 test("search route reveals terminal-style department and media pickers from the action strip", async () => {
@@ -4026,7 +4026,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("ARTCTL v1.3")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.4")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 
