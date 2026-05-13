@@ -35,12 +35,18 @@ function createFetchImpl({
   metClient,
   catalogDatabasePath = null,
   hydrationFetchImpl,
-  adminAuth = null,
-  workInfoGenerator = null
+  adminAuth = undefined,
+  workInfoGenerator = null,
+  autoAuthenticateAdmin = false
 } = {}) {
-  const apiApp = metClient
-    ? createArtctlApp({ metClient, allowLegacyMetRuntime: true, adminAuth, workInfoGenerator })
-    : createArtctlApp({ catalogDatabasePath, hydrationFetchImpl, adminAuth, workInfoGenerator });
+  const apiOptions = {
+    ...(metClient
+      ? { metClient, allowLegacyMetRuntime: true }
+      : { catalogDatabasePath, hydrationFetchImpl }),
+    ...(adminAuth !== undefined ? { adminAuth } : {}),
+    workInfoGenerator
+  };
+  const apiApp = createArtctlApp(apiOptions);
   const cookieJar = new Map();
 
   function getCookieHeader() {
@@ -76,15 +82,9 @@ function createFetchImpl({
     }
   }
 
-  return async function fetchImpl(resource, init = {}) {
-    const url = new URL(resource, "http://artctl.test");
-    const method = init.method ?? "GET";
-    requestLog.push(
-      method === "GET" ? `${url.pathname}${url.search}` : `${method} ${url.pathname}${url.search}`
-    );
-
+  async function dispatchRequest(url, init = {}) {
     const request = httpMocks.createRequest({
-      method,
+      method: init.method ?? "GET",
       url: url.pathname,
       query: Object.fromEntries(url.searchParams.entries()),
       body: init.body ? JSON.parse(init.body) : undefined,
@@ -102,6 +102,44 @@ function createFetchImpl({
     });
 
     applySetCookieHeader(response.getHeader("Set-Cookie"));
+    return response;
+  }
+
+  async function ensureAdminSession() {
+    if (!apiApp.get("artctlTestDefaultAdminAuth") || cookieJar.has("artctl_admin_session")) {
+      return;
+    }
+
+    const loginResponse = await dispatchRequest(new URL("http://artctl.test/api/admin/login"), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ username: "admin", password: "secret" })
+    });
+
+    if (loginResponse.statusCode !== 200) {
+      throw new Error("Unable to create test admin session.");
+    }
+  }
+
+  return async function fetchImpl(resource, init = {}) {
+    const url = new URL(resource, "http://artctl.test");
+    const method = init.method ?? "GET";
+    requestLog.push(
+      method === "GET" ? `${url.pathname}${url.search}` : `${method} ${url.pathname}${url.search}`
+    );
+
+    const shouldAutoAuthenticateAdmin =
+      url.pathname.startsWith("/api/admin") &&
+      url.pathname !== "/api/admin/login" &&
+      (url.pathname !== "/api/admin/session" || window.location.pathname.startsWith("/admin") || autoAuthenticateAdmin);
+
+    if (shouldAutoAuthenticateAdmin) {
+      await ensureAdminSession();
+    }
+
+    const response = await dispatchRequest(url, init);
 
     return {
       ok: response.statusCode >= 200 && response.statusCode < 300,
@@ -224,7 +262,7 @@ test("shared navigation hides the admin link when admin auth is configured but n
 test("homepage uses a wider route frame than standard pages", async () => {
   window.history.pushState({}, "", "/");
 
-  render(<App fetchImpl={fetchImpl} />);
+  render(<App fetchImpl={createFetchImpl()} />);
 
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   const galleryMain = screen.getByRole("main");
@@ -233,7 +271,7 @@ test("homepage uses a wider route frame than standard pages", async () => {
   cleanup();
   window.history.pushState({}, "", "/search");
 
-  render(<App fetchImpl={fetchImpl} />);
+  render(<App fetchImpl={createFetchImpl()} />);
 
   expect(await screen.findByText("> type search")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
@@ -244,7 +282,7 @@ test("homepage uses a wider route frame than standard pages", async () => {
 test("work route uses the wider route frame", async () => {
   window.history.pushState({}, "", "/works/42");
 
-  render(<App fetchImpl={fetchImpl} />);
+  render(<App fetchImpl={createFetchImpl()} />);
 
   expect(await screen.findByRole("heading", { name: "Work 42" })).toBeInTheDocument();
   expect(screen.getByRole("main").className).toContain("max-w-7xl");
@@ -261,7 +299,7 @@ test.each([
 ])("route $route renders its skeleton inside the shared shell", async ({ route, heading }) => {
   window.history.pushState({}, "", route);
 
-  render(<App fetchImpl={fetchImpl} />);
+  render(<App fetchImpl={createFetchImpl()} />);
 
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
@@ -269,13 +307,17 @@ test.each([
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
+  if (route.startsWith("/admin")) {
+    expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
+  } else {
+    expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
+  }
 });
 
 test("search route renders its terminal shell inside the shared app shell", async () => {
   window.history.pushState({}, "", "/search");
 
-  render(<App fetchImpl={fetchImpl} />);
+  render(<App fetchImpl={createFetchImpl()} />);
 
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(await screen.findByText("> type search")).toBeInTheDocument();
@@ -290,7 +332,7 @@ test("search route renders its terminal shell inside the shared app shell", asyn
 test("homepage route renders its shell without a page title", async () => {
   window.history.pushState({}, "", "/");
 
-  render(<App fetchImpl={fetchImpl} />);
+  render(<App fetchImpl={createFetchImpl()} />);
 
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Gallery" })).not.toBeInTheDocument();
@@ -345,6 +387,15 @@ test("admin routes show a login form when admin auth is configured and no admin 
   expect(passwordInput).toHaveClass("border-border");
   expect(passwordInput).toHaveClass("px-2");
   expect(passwordInput).toHaveClass("py-1");
+  expect(screen.queryByRole("heading", { name: "Admin" })).not.toBeInTheDocument();
+});
+
+test("admin routes still show a login form when admin auth is not configured", async () => {
+  window.history.pushState({}, "", "/admin");
+
+  render(<App fetchImpl={createFetchImpl({ adminAuth: null })} />);
+
+  expect(await screen.findByRole("heading", { name: "Admin Login" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Admin" })).not.toBeInTheDocument();
 });
 

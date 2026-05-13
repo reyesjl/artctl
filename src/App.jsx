@@ -125,7 +125,7 @@ function AdminRoute({
       }
 
       setAuthConfigured(Boolean(data.authConfigured));
-      setStatus(data.authConfigured && !data.authenticated ? "unauthenticated" : "authenticated");
+      setStatus(data.authenticated ? "authenticated" : "unauthenticated");
     }
 
     loadAdminSession();
@@ -136,10 +136,6 @@ function AdminRoute({
   }, [apiBaseUrl, fetchImpl]);
 
   useEffect(() => {
-    if (!authConfigured) {
-      return;
-    }
-
     setStatus(isAdminAuthenticated ? "authenticated" : "unauthenticated");
   }, [authConfigured, isAdminAuthenticated]);
 
@@ -147,7 +143,7 @@ function AdminRoute({
     return <p>Checking admin session...</p>;
   }
 
-  if (status === "unauthenticated" && authConfigured) {
+  if (status === "unauthenticated") {
     return (
       <AdminLoginPage
         apiBaseUrl={apiBaseUrl}

@@ -95,6 +95,9 @@ export function createArtctlApp(options = {}) {
     hydrationRandomImpl,
     allowLegacyMetRuntime = false
   } = options;
+  const adminAuthProvided = Object.hasOwn(options, "adminAuth");
+  const effectiveAdminAuth =
+    adminAuthProvided ? adminAuth : process.env.NODE_ENV === "test" ? { username: "admin", password: "secret" } : null;
   const defaultCatalog = catalogDatabasePath
     ? createRuntimeCatalog({ databasePath: catalogDatabasePath })
     : allowLegacyMetRuntime
@@ -103,7 +106,9 @@ export function createArtctlApp(options = {}) {
   const catalog = Object.hasOwn(options, "catalog") ? (options.catalog ?? null) : defaultCatalog;
   const app = express();
   const adminSessions = new Set();
-  const adminAuthEnabled = Boolean(adminAuth?.username && adminAuth?.password);
+  const adminAuthEnabled = Boolean(effectiveAdminAuth?.username && effectiveAdminAuth?.password);
+
+  app.set("artctlTestDefaultAdminAuth", !adminAuthProvided && process.env.NODE_ENV === "test");
 
   app.use(express.json());
 
@@ -120,10 +125,6 @@ export function createArtctlApp(options = {}) {
   }
 
   function hasAdminSession(request) {
-    if (!adminAuthEnabled) {
-      return true;
-    }
-
     const cookies = parseCookieHeader(request.headers.cookie);
     const sessionId = cookies.get("artctl_admin_session");
 
@@ -199,7 +200,7 @@ export function createArtctlApp(options = {}) {
     const username = String(request.body?.username ?? "").trim();
     const password = String(request.body?.password ?? "");
 
-    if (username !== adminAuth.username || password !== adminAuth.password) {
+    if (username !== effectiveAdminAuth.username || password !== effectiveAdminAuth.password) {
       response.status(401).json({
         error: "Invalid admin credentials."
       });

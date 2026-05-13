@@ -32,6 +32,34 @@ async function makeRequest(url, targetApp = app, { method = "GET", body = null }
   return response;
 }
 
+async function makeAdminRequest(url, targetApp = app, { method = "GET", body = null } = {}) {
+  const loginResponse = await makeRequest("/api/admin/login", targetApp, {
+    method: "POST",
+    body: {
+      username: "admin",
+      password: "secret"
+    }
+  });
+  const sessionCookie = loginResponse.getHeader("Set-Cookie");
+  const request = httpMocks.createRequest({
+    method,
+    url,
+    body,
+    headers: {
+      ...(sessionCookie ? { cookie: sessionCookie } : {})
+    }
+  });
+  const response = httpMocks.createResponse({ eventEmitter: EventEmitter });
+
+  await new Promise((resolve, reject) => {
+    response.on("end", resolve);
+    response.on("error", reject);
+    targetApp.handle(request, response, reject);
+  });
+
+  return response;
+}
+
 function createHeaders(contentType, setCookies = []) {
   return {
     get(name) {
@@ -105,6 +133,29 @@ describe("configured SQLite catalog runtime", () => {
         username: "admin",
         password: "secret"
       }
+    });
+    const response = await makeRequest("/api/admin/curated-groups", adminApp);
+
+    expect(response.statusCode).toBe(401);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Admin authentication required."
+    });
+  });
+
+  test("GET /api/admin/curated-groups rejects unauthenticated access when admin auth is not configured", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      adminAuth: null
     });
     const response = await makeRequest("/api/admin/curated-groups", adminApp);
 
@@ -246,11 +297,11 @@ describe("configured SQLite catalog runtime", () => {
 
     const galleryApp = createArtctlApp({ catalogDatabasePath: databasePath });
     expect(
-      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 2 } }))
+      (await makeAdminRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 2 } }))
         .statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 3 } }))
+      (await makeAdminRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 3 } }))
         .statusCode
     ).toBe(201);
     const response = await makeRequest("/api/gallery", galleryApp);
@@ -293,19 +344,19 @@ describe("configured SQLite catalog runtime", () => {
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
     expect(
       (
-        await makeRequest("/api/admin/curated-groups", adminApp, {
+        await makeAdminRequest("/api/admin/curated-groups", adminApp, {
           method: "POST",
           body: { slug: "featured-landscapes", name: "Featured Landscapes" }
         })
       ).statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 1 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 1 } }))
         .statusCode
     ).toBe(201);
     expect(
       (
-        await makeRequest("/api/admin/gallery", adminApp, {
+        await makeAdminRequest("/api/admin/gallery", adminApp, {
           method: "POST",
           body: { objectId: 2, groupSlug: "featured-landscapes" }
         })
@@ -313,14 +364,14 @@ describe("configured SQLite catalog runtime", () => {
     ).toBe(201);
     expect(
       (
-        await makeRequest("/api/admin/gallery", adminApp, {
+        await makeAdminRequest("/api/admin/gallery", adminApp, {
           method: "POST",
           body: { objectId: 3, groupSlug: "featured-landscapes" }
         })
       ).statusCode
     ).toBe(201);
 
-    const featureResponse = await makeRequest(
+    const featureResponse = await makeAdminRequest(
       "/api/admin/curated-groups/featured-landscapes/feature",
       adminApp,
       { method: "PATCH" }
@@ -368,7 +419,7 @@ describe("configured SQLite catalog runtime", () => {
     ).toBe(true);
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
-    const response = await makeRequest("/api/admin/gallery", adminApp);
+    const response = await makeAdminRequest("/api/admin/gallery", adminApp);
 
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
@@ -388,7 +439,7 @@ describe("configured SQLite catalog runtime", () => {
     ).toBe(true);
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
-    const response = await makeRequest("/api/admin/curated-groups", adminApp);
+    const response = await makeAdminRequest("/api/admin/curated-groups", adminApp);
 
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
@@ -420,7 +471,7 @@ describe("configured SQLite catalog runtime", () => {
     database.close();
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
-    const response = await makeRequest("/api/admin/curated-groups", adminApp);
+    const response = await makeAdminRequest("/api/admin/curated-groups", adminApp);
 
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
@@ -447,7 +498,7 @@ describe("configured SQLite catalog runtime", () => {
     ).toBe(true);
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
-    const response = await makeRequest("/api/admin/curated-groups", adminApp, {
+    const response = await makeAdminRequest("/api/admin/curated-groups", adminApp, {
       method: "POST",
       body: { name: "Featured Landscapes" }
     });
@@ -463,7 +514,7 @@ describe("configured SQLite catalog runtime", () => {
       }
     });
 
-    const listResponse = await makeRequest("/api/admin/curated-groups", adminApp);
+    const listResponse = await makeAdminRequest("/api/admin/curated-groups", adminApp);
 
     expect(JSON.parse(listResponse._getData())).toEqual({
       results: [
@@ -498,14 +549,14 @@ describe("configured SQLite catalog runtime", () => {
 
     expect(
       (
-        await makeRequest("/api/admin/curated-groups", adminApp, {
+        await makeAdminRequest("/api/admin/curated-groups", adminApp, {
           method: "POST",
           body: { name: "Featured Landscapes" }
         })
       ).statusCode
     ).toBe(201);
 
-    const response = await makeRequest("/api/admin/curated-groups", adminApp, {
+    const response = await makeAdminRequest("/api/admin/curated-groups", adminApp, {
       method: "POST",
       body: { name: "Featured Landscapes" }
     });
@@ -531,14 +582,14 @@ describe("configured SQLite catalog runtime", () => {
 
     expect(
       (
-        await makeRequest("/api/admin/curated-groups", adminApp, {
+        await makeAdminRequest("/api/admin/curated-groups", adminApp, {
           method: "POST",
           body: { name: "Featured Landscapes" }
         })
       ).statusCode
     ).toBe(201);
 
-    const response = await makeRequest("/api/admin/curated-groups/featured-landscapes", adminApp, {
+    const response = await makeAdminRequest("/api/admin/curated-groups/featured-landscapes", adminApp, {
       method: "PATCH",
       body: { name: "Evening Paintings" }
     });
@@ -570,14 +621,14 @@ describe("configured SQLite catalog runtime", () => {
 
     expect(
       (
-        await makeRequest("/api/admin/curated-groups", adminApp, {
+        await makeAdminRequest("/api/admin/curated-groups", adminApp, {
           method: "POST",
           body: { name: "Featured Landscapes" }
         })
       ).statusCode
     ).toBe(201);
 
-    const response = await makeRequest("/api/admin/curated-groups/featured-landscapes", adminApp, {
+    const response = await makeAdminRequest("/api/admin/curated-groups/featured-landscapes", adminApp, {
       method: "DELETE"
     });
 
@@ -586,7 +637,7 @@ describe("configured SQLite catalog runtime", () => {
       ok: true
     });
 
-    const listResponse = await makeRequest("/api/admin/curated-groups", adminApp);
+    const listResponse = await makeAdminRequest("/api/admin/curated-groups", adminApp);
 
     expect(JSON.parse(listResponse._getData())).toEqual({
       results: [
@@ -615,14 +666,14 @@ describe("configured SQLite catalog runtime", () => {
 
     expect(
       (
-        await makeRequest("/api/admin/curated-groups", adminApp, {
+        await makeAdminRequest("/api/admin/curated-groups", adminApp, {
           method: "POST",
           body: { slug: "featured-landscapes", name: "Featured Landscapes" }
         })
       ).statusCode
     ).toBe(201);
 
-    const response = await makeRequest("/api/admin/gallery", adminApp, {
+    const response = await makeAdminRequest("/api/admin/gallery", adminApp, {
       method: "POST",
       body: { objectId: 4926, groupSlug: "featured-landscapes" }
     });
@@ -640,7 +691,7 @@ describe("configured SQLite catalog runtime", () => {
       }
     });
 
-    const featuredResponse = await makeRequest(
+    const featuredResponse = await makeAdminRequest(
       "/api/admin/gallery?groupSlug=featured-landscapes",
       adminApp
     );
@@ -657,7 +708,7 @@ describe("configured SQLite catalog runtime", () => {
       ]
     });
 
-    const homepageResponse = await makeRequest("/api/admin/gallery", adminApp);
+    const homepageResponse = await makeAdminRequest("/api/admin/gallery", adminApp);
     expect(JSON.parse(homepageResponse._getData())).toEqual({
       results: []
     });
@@ -682,7 +733,7 @@ describe("configured SQLite catalog runtime", () => {
     expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
-    const response = await makeRequest("/api/admin/gallery", adminApp, {
+    const response = await makeAdminRequest("/api/admin/gallery", adminApp, {
       method: "POST",
       body: { objectId: 25 }
     });
@@ -700,7 +751,7 @@ describe("configured SQLite catalog runtime", () => {
       }
     });
 
-    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+    const listResponse = await makeAdminRequest("/api/admin/gallery", adminApp);
 
     expect(JSON.parse(listResponse._getData()).results.at(-1)).toEqual({
       objectId: 25,
@@ -725,14 +776,14 @@ describe("configured SQLite catalog runtime", () => {
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
         .statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
         .statusCode
     ).toBe(201);
-    const response = await makeRequest("/api/admin/gallery/4926", adminApp, {
+    const response = await makeAdminRequest("/api/admin/gallery/4926", adminApp, {
       method: "DELETE"
     });
 
@@ -741,7 +792,7 @@ describe("configured SQLite catalog runtime", () => {
       ok: true
     });
 
-    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+    const listResponse = await makeAdminRequest("/api/admin/gallery", adminApp);
 
     expect(JSON.parse(listResponse._getData())).toEqual({
       results: [
@@ -770,14 +821,14 @@ describe("configured SQLite catalog runtime", () => {
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
         .statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
         .statusCode
     ).toBe(201);
-    const response = await makeRequest("/api/admin/gallery/reorder", adminApp, {
+    const response = await makeAdminRequest("/api/admin/gallery/reorder", adminApp, {
       method: "PATCH",
       body: {
         objectId: 5046,
@@ -808,7 +859,7 @@ describe("configured SQLite catalog runtime", () => {
       ]
     });
 
-    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+    const listResponse = await makeAdminRequest("/api/admin/gallery", adminApp);
 
     expect(JSON.parse(listResponse._getData())).toEqual({
       results: [
@@ -845,14 +896,14 @@ describe("configured SQLite catalog runtime", () => {
 
     const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
         .statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
         .statusCode
     ).toBe(201);
-    const response = await makeRequest("/api/admin/gallery/reorder", adminApp, {
+    const response = await makeAdminRequest("/api/admin/gallery/reorder", adminApp, {
       method: "PATCH",
       body: {
         objectId: 4926,
@@ -909,14 +960,14 @@ describe("configured SQLite catalog runtime", () => {
       })
     });
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
         .statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+      (await makeAdminRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
         .statusCode
     ).toBe(201);
-    const response = await makeRequest("/api/admin/gallery/5046/hydrate", adminApp, {
+    const response = await makeAdminRequest("/api/admin/gallery/5046/hydrate", adminApp, {
       method: "POST"
     });
 
@@ -933,7 +984,7 @@ describe("configured SQLite catalog runtime", () => {
       }
     });
 
-    const listResponse = await makeRequest("/api/admin/gallery", adminApp);
+    const listResponse = await makeAdminRequest("/api/admin/gallery", adminApp);
 
     expect(JSON.parse(listResponse._getData()).results[1]).toEqual({
       objectId: 5046,
@@ -973,27 +1024,27 @@ describe("configured SQLite catalog runtime", () => {
       })
     });
     expect(
-      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 1 } }))
+      (await makeAdminRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 1 } }))
         .statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 2 } }))
+      (await makeAdminRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 2 } }))
         .statusCode
     ).toBe(201);
     expect(
-      (await makeRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 3 } }))
+      (await makeAdminRequest("/api/admin/gallery", galleryApp, { method: "POST", body: { objectId: 3 } }))
         .statusCode
     ).toBe(201);
 
     expect(
-      (await makeRequest("/api/admin/gallery/2/hydrate", galleryApp, { method: "POST" })).statusCode
+      (await makeAdminRequest("/api/admin/gallery/2/hydrate", galleryApp, { method: "POST" })).statusCode
     ).toBe(200);
     expect(
-      (await makeRequest("/api/admin/gallery/3/hydrate", galleryApp, { method: "POST" })).statusCode
+      (await makeAdminRequest("/api/admin/gallery/3/hydrate", galleryApp, { method: "POST" })).statusCode
     ).toBe(200);
     expect(
       (
-        await makeRequest("/api/admin/gallery/reorder", galleryApp, {
+        await makeAdminRequest("/api/admin/gallery/reorder", galleryApp, {
           method: "PATCH",
           body: { objectId: 3, targetObjectId: 2 }
         })
