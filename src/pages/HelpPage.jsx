@@ -326,7 +326,8 @@ export function HelpPage() {
               >
                 taskctl.net
               </a>
-              .
+              , a quiet terminal-style task manager for focused planning and
+              execution.
             </p>
           </HelpSection>
 

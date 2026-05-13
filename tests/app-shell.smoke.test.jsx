@@ -3582,6 +3582,7 @@ test("help route presents the current ARTCTL product copy", async () => {
   expect(within(helpPage).getByText("── ABOUT ME ──")).toBeInTheDocument();
   expect(within(helpPage).getByText(/software engineer with 10\+ years of experience in full-stack work\./i)).toBeInTheDocument();
   expect(within(helpPage).getByText(/simple things done really well can make for good software and be useful and make people happy\./i)).toBeInTheDocument();
+  expect(within(helpPage).getByText(/a quiet terminal-style task manager for focused planning and execution\./i)).toBeInTheDocument();
   expect(within(helpPage).getByRole("link", { name: /taskctl\.net/i })).toHaveAttribute("href", "https://taskctl.net");
 });
 
