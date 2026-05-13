@@ -126,6 +126,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
         }
 
         setError("");
+        setIsMobileDetailsExpanded(!data.imageUrl);
         setWork(data);
       }
     }
@@ -153,11 +154,11 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     setAiInfoStatus("idle");
     setIsStudyOverlayVisible(false);
     setIsStudyOverlayExpanded(true);
-    setIsMobileDetailsExpanded(!work?.imageUrl);
+    setIsMobileDetailsExpanded(false);
     dragStateRef.current = null;
     lastTapAtRef.current = 0;
     studySheetTouchRef.current = null;
-  }, [objectId, work?.imageUrl]);
+  }, [objectId]);
 
   useEffect(() => {
     if (!work?.imageUrl) {
