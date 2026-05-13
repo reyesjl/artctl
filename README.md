@@ -106,6 +106,51 @@ Run the production server:
 npm run start
 ```
 
+## 7. Deploy like `cortex`
+
+This repo now has the same GitHub Actions deployment shape as `cortex`:
+
+- `.github/workflows/deploy.yml` runs `npm ci`, `npm test`, and `npm run build` on pushes to `main`
+- the deploy job SSHes into the server and runs `scripts/deploy.sh`
+- `scripts/deploy.sh` installs dependencies, builds the app, restarts the systemd service, and verifies `GET /api/health`
+
+Server-side templates live here:
+
+- `deploy/systemd/artctl.service`
+- `deploy/nginx/artctl.conf`
+
+Recommended layout for running this on the same machine as the other app:
+
+- deploy checkout at `/srv/artctl`
+- systemd service name `artctl`
+- app process listening on `127.0.0.1:3000`
+- nginx routing the ARTCTL hostname to `/srv/artctl/dist` and proxying `/api/*` to port `3000`
+
+Typical Ubuntu setup:
+
+```bash
+sudo mkdir -p /srv/artctl
+sudo chown -R cortex:cortex /srv/artctl
+sudo cp /srv/artctl/deploy/systemd/artctl.service /etc/systemd/system/artctl.service
+sudo cp /srv/artctl/deploy/nginx/artctl.conf /etc/nginx/sites-available/artctl
+sudo ln -sf /etc/nginx/sites-available/artctl /etc/nginx/sites-enabled/artctl
+sudo systemctl daemon-reload
+sudo systemctl enable artctl
+sudo systemctl start artctl
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+If you are sharing the box with the other app, keep the ports distinct and set the correct `server_name` in `deploy/nginx/artctl.conf` before enabling the site.
+The included systemd unit assumes you are reusing the existing `cortex` deploy user.
+
+GitHub Actions deploy secrets should match `cortex`:
+
+- `DEPLOY_HOST`
+- `DEPLOY_PORT`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+
 ## Workflow summary
 
 ```bash

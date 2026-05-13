@@ -1272,8 +1272,9 @@ test("homepage uses hydrated curated entries from the admin-managed gallery list
   expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: 'Hydrate The "Shipwreck Medal"' }));
   await waitFor(() => {
-    expect(screen.getByText("2 · 5046 · hydrated")).toBeInTheDocument();
+    expect(screen.getByText("5046 · hydrated")).toBeInTheDocument();
   });
+  expectAdminGalleryCardOrder(screen.getByText('The "Shipwreck Medal"').closest("li"), 2);
 
   cleanup();
   window.history.pushState({}, "", "/");
@@ -2880,8 +2881,8 @@ test("work viewer renders a themed layout and metadata panel while preserving wo
   window.history.pushState({}, "", "/works/436121");
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
-  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
-  const viewer = image.closest("div");
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const viewer = document.querySelector(".work-viewer");
   const metadata = screen.getByLabelText("Work metadata");
 
   expect(viewer).not.toBeNull();

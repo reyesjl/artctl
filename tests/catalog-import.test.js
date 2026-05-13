@@ -415,7 +415,10 @@ describe("catalog import", () => {
       tagsWikidataURL: "https://www.wikidata.org/wiki/Q171497|https://www.wikidata.org/wiki/Q170571",
       departmentId: null,
       primaryImage: "",
-      primaryImageSmall: ""
+      primaryImageSmall: "",
+      hydrationStatus: "pending",
+      hydrationError: "",
+      hydratedAt: ""
     });
   });
 
@@ -502,7 +505,10 @@ describe("catalog import", () => {
           departmentId: 1,
           isPublicDomain: true,
           primaryImage: "",
-          primaryImageSmall: ""
+          primaryImageSmall: "",
+          hydrationStatus: "pending",
+          hydrationError: "",
+          hydratedAt: ""
         }
       ],
       summary: {

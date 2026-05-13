@@ -231,7 +231,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
   return (
     <RouteFrame maxWidthClassName="max-w-7xl">
-      <div className="search-shell w-full max-w-full border border-border bg-card divide-y divide-border font-mono">
+      <div className="search-shell w-full max-w-full border border-solid border-border bg-card divide-y divide-border font-mono">
         <form className="search-form" onSubmit={handleSubmit}>
           <div className="border-b border-border px-3 py-1 text-xs text-muted-foreground">
             {"> type search"}

@@ -107,6 +107,12 @@ export function createArtctlApp(options = {}) {
 
   app.use(express.json());
 
+  app.get("/api/health", (_request, response) => {
+    response.json({
+      ok: true
+    });
+  });
+
   function createAdminSession() {
     const sessionId = randomBytes(24).toString("hex");
     adminSessions.add(sessionId);

@@ -26,6 +26,16 @@ async function makeRequest(url, targetApp) {
 }
 
 describe("server index startup", () => {
+  test("createProductionArtctlApp reports health", async () => {
+    const app = createProductionArtctlApp();
+    const response = await makeRequest("/api/health", app);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true
+    });
+  });
+
   test("createProductionArtctlApp serves search results from CATALOG_DATABASE_PATH", async () => {
     const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-server-index-"));
     const databasePath = path.join(tempDir, "catalog.sqlite");
