@@ -200,10 +200,72 @@ function expectAdminGalleryCardOrder(card, order) {
   expect(orderBadge).toHaveClass("text-muted-foreground");
 }
 
+function setViewportWidth(width) {
+  window.innerWidth = width;
+  window.matchMedia = (query) => {
+    const minWidthMatch = /min-width:\s*(\d+)px/.exec(query);
+    const maxWidthMatch = /max-width:\s*(\d+)px/.exec(query);
+    const minWidth = minWidthMatch ? Number(minWidthMatch[1]) : null;
+    const maxWidth = maxWidthMatch ? Number(maxWidthMatch[1]) : null;
+    const matches =
+      (minWidth === null || width >= minWidth) &&
+      (maxWidth === null || width <= maxWidth);
+
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addListener() {},
+      removeListener() {},
+      addEventListener() {},
+      removeEventListener() {},
+      dispatchEvent() {
+        return false;
+      }
+    };
+  };
+}
+
+function dispatchTouchEvent(target, type, touches, changedTouches = touches) {
+  const normalizedTouches = touches.map((touch, index) => ({
+    identifier: touch.identifier ?? index,
+    clientX: touch.clientX,
+    clientY: touch.clientY
+  }));
+  const normalizedChangedTouches = changedTouches.map((touch, index) => ({
+    identifier: touch.identifier ?? index,
+    clientX: touch.clientX,
+    clientY: touch.clientY
+  }));
+  const eventData = {
+    touches: normalizedTouches,
+    changedTouches: normalizedChangedTouches,
+    targetTouches: normalizedTouches
+  };
+
+  if (type === "touchstart") {
+    fireEvent.touchStart(target, eventData);
+    return;
+  }
+
+  if (type === "touchmove") {
+    fireEvent.touchMove(target, eventData);
+    return;
+  }
+
+  if (type === "touchend") {
+    fireEvent.touchEnd(target, eventData);
+    return;
+  }
+
+  fireEvent(target, new Event(type, { bubbles: true, cancelable: true }));
+}
+
 beforeEach(() => {
   cleanup();
   installLocalStorage();
   window.localStorage.clear();
+  setViewportWidth(1024);
   window.history.pushState({}, "", "/");
 });
 
@@ -220,7 +282,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("ARTCTL v1.0").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.1").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -1400,7 +1462,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("ARTCTL v1.0")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.1")).toBeInTheDocument();
 });
 
 test("search route reveals terminal-style department and media pickers from the action strip", async () => {
@@ -2575,6 +2637,48 @@ test("work viewer renders the preferred image and compact metadata with a Met li
   );
 });
 
+test("mobile work viewer collapses details into a tappable summary row by default", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(
+    await screen.findByRole("img", { name: "The Great Wave off Kanagawa" })
+  ).toBeInTheDocument();
+
+  const detailsToggle = screen.getByRole("button", { name: "Show work details" });
+
+  expect(detailsToggle).toHaveTextContent("Japanese");
+  expect(detailsToggle).toHaveTextContent("ca. 1830-32");
+  expect(
+    screen.queryByText("Print - Polychrome woodblock print; ink and color on paper")
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "View on the Met" })).not.toBeInTheDocument();
+
+  fireEvent.click(detailsToggle);
+
+  expect(await screen.findByText("Print - Polychrome woodblock print; ink and color on paper")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
+    "href",
+    "https://www.metmuseum.org/art/collection/search/45434"
+  );
+});
+
 test("work viewer can request and render ai info for an art student", async () => {
   const requests = [];
   const metClient = {
@@ -2752,6 +2856,99 @@ test("study it does not start a second generation while a note already exists on
   ).toHaveLength(1);
 });
 
+test("mobile work viewer opens study content in a separate bottom sheet", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Katsushika Hokusai",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  const workInfoGenerator = {
+    async explainWorkForArtStudent() {
+      return {
+        observe:
+          "The wave arcs over the boats, using scale contrast and repeated curves to focus attention.",
+        context:
+          "Hokusai made the print in Edo-period Japan, where landscape prints circulated as popular images.",
+        technique:
+          "Crisp contour and flat color make the composition legible while the repeated curve unifies the scene.",
+        sources: []
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient, workInfoGenerator })} />);
+
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const viewer = screen.getByLabelText("Artwork viewer");
+
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+
+  const studySheet = await screen.findByRole("dialog", { name: "Study sheet" });
+
+  expect(studySheet).toBeInTheDocument();
+  expect(viewer).not.toContainElement(screen.getByText("observe"));
+  expect(studySheet).toContainElement(screen.getByText("observe"));
+  expect(screen.getByRole("button", { name: "Close study sheet" })).toBeInTheDocument();
+});
+
+test("mobile study sheet closes when swiped downward", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Katsushika Hokusai",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  const workInfoGenerator = {
+    async explainWorkForArtStudent() {
+      return {
+        observe:
+          "The wave arcs over the boats, using scale contrast and repeated curves to focus attention.",
+        context:
+          "Hokusai made the print in Edo-period Japan, where landscape prints circulated as popular images.",
+        technique:
+          "Crisp contour and flat color make the composition legible while the repeated curve unifies the scene.",
+        sources: []
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient, workInfoGenerator })} />);
+
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+
+  const studySheet = await screen.findByRole("dialog", { name: "Study sheet" });
+
+  dispatchTouchEvent(studySheet, "touchstart", [{ clientX: 120, clientY: 120 }]);
+  dispatchTouchEvent(studySheet, "touchmove", [{ clientX: 120, clientY: 220 }]);
+  dispatchTouchEvent(studySheet, "touchend", [], [{ clientX: 120, clientY: 220 }]);
+
+  await waitFor(() => {
+    expect(screen.queryByRole("dialog", { name: "Study sheet" })).not.toBeInTheDocument();
+  });
+});
+
 test("direct entry to an image-backed work route shows inspection controls", async () => {
   const metClient = {
     async getWork(objectId) {
@@ -2794,6 +2991,36 @@ test("direct entry to an image-backed work route shows inspection controls", asy
   expect(screen.getByRole("button", { name: "Original mode" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByRole("button", { name: "Original mode" })).toHaveClass("text-primary");
   expect(screen.getByRole("button", { name: "Edges mode" })).not.toHaveClass("text-primary");
+});
+
+test("mobile work viewer places inspection controls below the image instead of overlaying it", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const viewer = screen.getByLabelText("Artwork viewer");
+  const controls = screen.getByLabelText("Artwork inspection controls");
+
+  expect(viewer).toContainElement(image);
+  expect(viewer).not.toContainElement(screen.getByRole("button", { name: "Zoom in" }));
+  expect(controls).toContainElement(screen.getByRole("button", { name: "Zoom in" }));
+  expect(controls).toContainElement(screen.getByRole("button", { name: "Study it" }));
 });
 
 test("work viewer zoom controls change the artwork presentation and reset to the default view", async () => {
@@ -2971,6 +3198,186 @@ test("dragging a zoomed work image pans it without displacing the metadata panel
   expect(screen.getByRole("link", { name: "View on the Met" })).toBeInTheDocument();
 });
 
+test("mobile work viewer pans a zoomed image with one-finger drag", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await waitFor(() => {
+    expect(image).toHaveStyle({
+      transform: "translate(0px, 0px) scale(1.5)"
+    });
+  });
+  dispatchTouchEvent(image, "touchstart", [{ clientX: 40, clientY: 50 }]);
+  dispatchTouchEvent(image, "touchmove", [{ clientX: 68, clientY: 74 }]);
+  dispatchTouchEvent(image, "touchend", [], [{ clientX: 68, clientY: 74 }]);
+
+  expect(image).toHaveStyle({
+    transform: "translate(28px, 24px) scale(1.5)"
+  });
+});
+
+test("mobile work viewer resets zoom and pan on double tap", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await waitFor(() => {
+    expect(image).toHaveStyle({
+      transform: "translate(0px, 0px) scale(1.5)"
+    });
+  });
+
+  dispatchTouchEvent(image, "touchstart", [{ clientX: 40, clientY: 50 }]);
+  dispatchTouchEvent(image, "touchmove", [{ clientX: 68, clientY: 74 }]);
+  dispatchTouchEvent(image, "touchend", [], [{ clientX: 68, clientY: 74 }]);
+
+  expect(image).toHaveStyle({
+    transform: "translate(28px, 24px) scale(1.5)"
+  });
+
+  dispatchTouchEvent(image, "touchstart", [{ clientX: 60, clientY: 60 }]);
+  dispatchTouchEvent(image, "touchend", [], [{ clientX: 60, clientY: 60 }]);
+  dispatchTouchEvent(image, "touchstart", [{ clientX: 60, clientY: 60 }]);
+  dispatchTouchEvent(image, "touchend", [], [{ clientX: 60, clientY: 60 }]);
+
+  await waitFor(() => {
+    expect(image).toHaveStyle({
+      transform: "translate(0px, 0px) scale(1)"
+    });
+  });
+});
+
+test("mobile work viewer zooms in with a two-finger pinch gesture", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  dispatchTouchEvent(image, "touchstart", [
+    { identifier: 1, clientX: 50, clientY: 50 },
+    { identifier: 2, clientX: 150, clientY: 50 }
+  ]);
+  dispatchTouchEvent(image, "touchmove", [
+    { identifier: 1, clientX: 25, clientY: 50 },
+    { identifier: 2, clientX: 175, clientY: 50 }
+  ]);
+
+  await waitFor(() => {
+    expect(image).toHaveStyle({
+      transform: "translate(0px, 0px) scale(1.5)"
+    });
+  });
+});
+
+test("mobile work viewer clamps pan so a zoomed image cannot be dragged fully out of view", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const stage = image.parentElement;
+
+  stage.getBoundingClientRect = () => ({
+    width: 300,
+    height: 200,
+    top: 0,
+    left: 0,
+    right: 300,
+    bottom: 200
+  });
+  image.getBoundingClientRect = () => ({
+    width: 300,
+    height: 200,
+    top: 0,
+    left: 0,
+    right: 300,
+    bottom: 200
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+  await waitFor(() => {
+    expect(image).toHaveStyle({
+      transform: "translate(0px, 0px) scale(1.5)"
+    });
+  });
+
+  dispatchTouchEvent(image, "touchstart", [{ clientX: 40, clientY: 50 }]);
+  dispatchTouchEvent(image, "touchmove", [{ clientX: 400, clientY: 400 }]);
+  dispatchTouchEvent(image, "touchend", [], [{ clientX: 400, clientY: 400 }]);
+
+  expect(image).toHaveStyle({
+    transform: "translate(75px, 50px) scale(1.5)"
+  });
+});
+
 test("work viewer renders a themed layout and metadata panel while preserving work details", async () => {
   const metClient = {
     async getWork(objectId) {
@@ -3088,6 +3495,35 @@ test("work viewer shows metadata when the Met API has no image for the object", 
   expect(screen.getByText("Image unavailable through the Met API.")).toBeInTheDocument();
   expect(screen.queryByRole("img", { name: "Galisteo Creek" })).not.toBeInTheDocument();
   expect(screen.getByText("Gustave Baumann")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
+    "href",
+    "https://www.metmuseum.org/art/collection/search/486055"
+  );
+});
+
+test("mobile work viewer auto-opens details when no image is available", async () => {
+  setViewportWidth(390);
+
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "Galisteo Creek",
+        artist: "Gustave Baumann",
+        date: "1920",
+        context: "Color woodcut - Ink and color on paper",
+        imageUrl: "",
+        metUrl: "https://www.metmuseum.org/art/collection/search/486055"
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/486055");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("heading", { name: "Galisteo Creek" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Hide work details" })).toBeInTheDocument();
+  expect(screen.getByText("Color woodcut - Ink and color on paper")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "View on the Met" })).toHaveAttribute(
     "href",
     "https://www.metmuseum.org/art/collection/search/486055"
@@ -3232,7 +3668,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("ARTCTL v1.0")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.1")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 
