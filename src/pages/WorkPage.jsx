@@ -114,53 +114,62 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           className="work-viewer mt-4 grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)] sm:items-start"
         >
           <figure
-            className="work-image-frame m-0 grid gap-3 border border-border bg-secondary p-3"
+            className="work-image-frame relative m-0 overflow-hidden border border-border bg-secondary"
             aria-label={work.imageUrl ? "Artwork viewer" : undefined}
           >
             {work.imageUrl ? (
               <>
-                <figcaption className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <figcaption
+                  className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-sm border border-border bg-background/45 px-3 py-2 text-xs text-muted-foreground shadow-sm transition-colors hover:bg-background/60 focus-within:bg-background/60"
+                  aria-label="Artwork inspection controls"
+                >
+                  <span>zoom</span>
                   <button
                     type="button"
                     className="text-action"
+                    aria-label="Zoom in"
                     onClick={handleZoomIn}
                     disabled={scale >= MAX_SCALE}
                   >
-                    Zoom in
+                    [+]
                   </button>
                   <button
                     type="button"
                     className="text-action"
+                    aria-label="Zoom out"
                     onClick={handleZoomOut}
                     disabled={scale <= MIN_SCALE}
                   >
-                    Zoom out
+                    [-]
                   </button>
                   <button
                     type="button"
                     className="text-action"
+                    aria-label="Reset view"
                     onClick={handleResetView}
                     disabled={scale === MIN_SCALE && pan.x === 0 && pan.y === 0}
                   >
-                    Reset view
+                    [reset]
                   </button>
                 </figcaption>
-                <img
-                  className="work-image block h-auto w-full select-none"
-                  src={work.imageUrl}
-                  alt={work.title}
-                  draggable="false"
-                  onMouseDown={handleMouseDown}
-                  onMouseMove={handleMouseMove}
-                  onMouseUp={handleMouseUp}
-                  onMouseLeave={handleMouseUp}
-                  style={{
-                    cursor: scale > MIN_SCALE ? (dragStateRef.current ? "grabbing" : "grab") : "default",
-                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
-                    transformOrigin: "center center",
-                    transition: dragStateRef.current ? "none" : "transform 150ms ease"
-                  }}
-                />
+                <div className="work-image-stage min-h-[320px] overflow-hidden">
+                  <img
+                    className="work-image block h-auto w-full select-none"
+                    src={work.imageUrl}
+                    alt={work.title}
+                    draggable="false"
+                    onMouseDown={handleMouseDown}
+                    onMouseMove={handleMouseMove}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseUp}
+                    style={{
+                      cursor: scale > MIN_SCALE ? (dragStateRef.current ? "grabbing" : "grab") : "default",
+                      transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+                      transformOrigin: "center center",
+                      transition: dragStateRef.current ? "none" : "transform 150ms ease"
+                    }}
+                  />
+                </div>
               </>
             ) : (
               <p className="work-image-unavailable m-0 px-4 py-6 text-center text-muted-foreground">

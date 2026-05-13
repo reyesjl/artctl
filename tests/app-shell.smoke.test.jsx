@@ -163,7 +163,7 @@ test("homepage uses a wider route frame than standard pages", async () => {
 
   render(<App fetchImpl={fetchImpl} />);
 
-  expect(await screen.findByText(">type search")).toBeInTheDocument();
+  expect(await screen.findByText("> type search")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   const searchMain = screen.getByRole("main");
   expect(searchMain.className).toContain("max-w-7xl");
@@ -206,7 +206,7 @@ test("search route renders its terminal shell inside the shared app shell", asyn
   render(<App fetchImpl={fetchImpl} />);
 
   expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
-  expect(await screen.findByText(">type search")).toBeInTheDocument();
+  expect(await screen.findByText("> type search")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
@@ -803,14 +803,14 @@ test("search route keeps its content on the shared shell background", async () =
 
   render(<App fetchImpl={fetchImpl} />);
 
-  await screen.findByText(">type search");
+  await screen.findByText("> type search");
   const queryInput = screen.getByPlaceholderText("artist, title, culture, medium...");
   const searchShell = queryInput.closest(".search-shell");
   const searchForm = queryInput.closest("form");
 
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(queryInput).not.toBeNull();
-  expect(screen.getByText(">type search")).toBeInTheDocument();
+  expect(screen.getByText("> type search")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "[departments]" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "[media]" })).toBeInTheDocument();
   expect(searchShell).toHaveClass("border");
@@ -1457,7 +1457,7 @@ test("search route shows an empty state before any query is submitted", async ()
 
   render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
 
-  expect(await screen.findByText(">type search")).toBeInTheDocument();
+  expect(await screen.findByText("> type search")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   await waitFor(() => {
     expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
@@ -1980,9 +1980,21 @@ test("direct entry to an image-backed work route shows inspection controls", asy
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
   expect(await screen.findByRole("img", { name: "The Great Wave off Kanagawa" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Reset view" })).toBeInTheDocument();
+  const viewer = screen.getByLabelText("Artwork viewer");
+  const zoomIn = screen.getByRole("button", { name: "Zoom in" });
+  const zoomOut = screen.getByRole("button", { name: "Zoom out" });
+  const resetView = screen.getByRole("button", { name: "Reset view" });
+
+  expect(zoomIn).toBeInTheDocument();
+  expect(zoomOut).toBeInTheDocument();
+  expect(resetView).toBeInTheDocument();
+  expect(viewer).toContainElement(zoomIn);
+  expect(viewer).toContainElement(zoomOut);
+  expect(viewer).toContainElement(resetView);
+  expect(screen.getByText("zoom")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Zoom in" })).toHaveTextContent("[+]");
+  expect(screen.getByRole("button", { name: "Zoom out" })).toHaveTextContent("[-]");
+  expect(screen.getByRole("button", { name: "Reset view" })).toHaveTextContent("[reset]");
 });
 
 test("work viewer zoom controls change the artwork presentation and reset to the default view", async () => {
@@ -2004,16 +2016,19 @@ test("work viewer zoom controls change the artwork presentation and reset to the
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
   const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const overlay = screen.getByLabelText("Artwork inspection controls");
 
   expect(image).toHaveStyle({
     transform: "translate(0px, 0px) scale(1)"
   });
+  expect(overlay).toContainElement(screen.getByRole("button", { name: "Zoom in" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
 
   expect(image).toHaveStyle({
     transform: "translate(0px, 0px) scale(1.5)"
   });
+  expect(overlay).toContainElement(screen.getByRole("button", { name: "Reset view" }));
 
   fireEvent.click(screen.getByRole("button", { name: "Reset view" }));
 
@@ -2113,6 +2128,7 @@ test("work viewer preserves image framing inside a themed media surface", async 
   expect(frame).toHaveClass("bg-secondary");
   expect(image).toHaveClass("block");
   expect(image).toHaveClass("w-full");
+  expect(image.parentElement).not.toHaveClass("p-3");
 });
 
 test("work viewer shows a themed unavailable-image state while preserving metadata", async () => {
