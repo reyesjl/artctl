@@ -89,6 +89,7 @@ export function createArtctlApp(options = {}) {
     staticDir = null,
     catalogDatabasePath = null,
     adminAuth = null,
+    workInfoGenerator = null,
     hydrationFetchImpl = fetch,
     hydrationSleepImpl,
     hydrationRandomImpl,
@@ -132,6 +133,39 @@ export function createArtctlApp(options = {}) {
     response.status(401).json({
       error: "Admin authentication required."
     });
+  }
+
+  async function loadWorkByObjectId(objectId) {
+    if (catalog?.getWork) {
+      if (catalogDatabasePath) {
+        const hydrationState = getObjectHydrationState({ databasePath: catalogDatabasePath, objectId });
+
+        if (
+          hydrationState?.hydrationStatus === "pending" &&
+          !hydrationState.primaryImage &&
+          !hydrationState.primaryImageSmall
+        ) {
+          try {
+            await runCatalogHydration({
+              databasePath: catalogDatabasePath,
+              limit: 1,
+              objectIds: [objectId],
+              fetchImpl: hydrationFetchImpl,
+              sleepImpl: hydrationSleepImpl,
+              randomImpl: hydrationRandomImpl
+            });
+          } catch (error) {
+            if (!(error instanceof MetHydrationAbortError)) {
+              throw error;
+            }
+          }
+        }
+      }
+
+      return catalog.getWork(objectId);
+    }
+
+    return metClient.getWork(objectId);
   }
 
   app.get("/api/app-shell", (_request, response) => {
@@ -698,33 +732,8 @@ export function createArtctlApp(options = {}) {
       return;
     }
 
-    if (catalog?.getWork) {
-      if (catalogDatabasePath) {
-        const hydrationState = getObjectHydrationState({ databasePath: catalogDatabasePath, objectId });
-
-        if (
-          hydrationState?.hydrationStatus === "pending" &&
-          !hydrationState.primaryImage &&
-          !hydrationState.primaryImageSmall
-        ) {
-          try {
-            await runCatalogHydration({
-              databasePath: catalogDatabasePath,
-              limit: 1,
-              objectIds: [objectId],
-              fetchImpl: hydrationFetchImpl,
-              sleepImpl: hydrationSleepImpl,
-              randomImpl: hydrationRandomImpl
-            });
-          } catch (error) {
-            if (!(error instanceof MetHydrationAbortError)) {
-              throw error;
-            }
-          }
-        }
-      }
-
-      const work = await catalog.getWork(objectId);
+    try {
+      const work = await loadWorkByObjectId(objectId);
 
       if (!work) {
         response.status(404).json({
@@ -734,26 +743,49 @@ export function createArtctlApp(options = {}) {
       }
 
       response.json(work);
-      return;
-    }
-
-    let work;
-
-    try {
-      work = await metClient.getWork(objectId);
     } catch (error) {
       response.status(502).json(buildMetErrorBody(metClient, error.message));
+    }
+  });
+
+  app.post("/api/works/:objectId/ai-info", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
       return;
     }
 
-    if (!work) {
-      response.status(404).json({
-        error: "Work not found."
+    const objectId = Number.parseInt(request.params.objectId, 10);
+
+    if (Number.isNaN(objectId)) {
+      response.status(400).json({
+        error: "Object ID must be a number."
       });
       return;
     }
 
-    response.json(work);
+    if (!workInfoGenerator?.explainWorkForArtStudent) {
+      response.status(501).json({
+        error: "AI artwork info is not configured."
+      });
+      return;
+    }
+
+    try {
+      const work = await loadWorkByObjectId(objectId);
+
+      if (!work) {
+        response.status(404).json({
+          error: "Work not found."
+        });
+        return;
+      }
+
+      const summary = await workInfoGenerator.explainWorkForArtStudent(work);
+      response.json(summary);
+    } catch (error) {
+      response.status(502).json({
+        error: error instanceof Error ? error.message : "Unable to generate artwork explanation."
+      });
+    }
   });
 
   if (staticDir) {

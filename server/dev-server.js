@@ -3,7 +3,8 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer as createViteServer } from "vite";
 import { createArtctlApp } from "./app.js";
-import { loadArtctlEnv, resolveAdminAuth, resolveCatalogDatabasePath } from "./local-env.js";
+import { loadArtctlEnv, resolveAdminAuth, resolveCatalogDatabasePath, resolveWorkAiConfig } from "./local-env.js";
+import { createWorkInfoGenerator } from "./work-ai.js";
 
 function resolveDevServerOptions(processEnv = process.env) {
   const resolvedEnv = loadArtctlEnv(processEnv);
@@ -11,17 +12,19 @@ function resolveDevServerOptions(processEnv = process.env) {
   return {
     port: Number(resolvedEnv.PORT ?? 3000),
     catalogDatabasePath: resolveCatalogDatabasePath(processEnv),
-    adminAuth: resolveAdminAuth(processEnv)
+    adminAuth: resolveAdminAuth(processEnv),
+    workAiConfig: resolveWorkAiConfig(processEnv)
   };
 }
 
 export function createDevArtctlApp(processEnv = process.env) {
-  const { catalogDatabasePath, adminAuth } = resolveDevServerOptions(processEnv);
+  const { catalogDatabasePath, adminAuth, workAiConfig } = resolveDevServerOptions(processEnv);
 
   return createArtctlApp({
     serveSpa: false,
     catalogDatabasePath,
-    adminAuth
+    adminAuth,
+    workInfoGenerator: createWorkInfoGenerator(workAiConfig ?? undefined)
   });
 }
 

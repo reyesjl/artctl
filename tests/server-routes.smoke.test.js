@@ -1223,6 +1223,66 @@ describe("work detail API", () => {
     });
   });
 
+  test("POST /api/works/:objectId/ai-info returns an art-student explanation for the work", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getWork(objectId) {
+        expect(objectId).toBe(436121);
+
+        return {
+          objectId: 436121,
+          title: "The Great Wave off Kanagawa",
+          artist: "Katsushika Hokusai",
+          date: "ca. 1830-32",
+          context: "Print - Polychrome woodblock print; ink and color on paper",
+          imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+          metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        };
+      }
+    };
+    const workInfoGenerator = {
+      async explainWorkForArtStudent(work) {
+        expect(work).toEqual({
+          objectId: 436121,
+          title: "The Great Wave off Kanagawa",
+          artist: "Katsushika Hokusai",
+          date: "ca. 1830-32",
+          context: "Print - Polychrome woodblock print; ink and color on paper",
+          imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+          metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        });
+
+        return {
+          observe:
+            "The wave dominates the boats through scale contrast and repeated curvature.",
+          context:
+            "Hokusai made the print in Edo-period Japan, when landscape prints circulated broadly.",
+          technique:
+            "Strong contour and flat color keep the composition legible while unifying the scene.",
+          sources: []
+        };
+      }
+    };
+    const detailApp = createArtctlApp({ catalog, workInfoGenerator });
+
+    const response = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      observe:
+        "The wave dominates the boats through scale contrast and repeated curvature.",
+      context:
+        "Hokusai made the print in Edo-period Japan, when landscape prints circulated broadly.",
+      technique:
+        "Strong contour and flat color keep the composition legible while unifying the scene.",
+      sources: []
+    });
+  });
+
   test("GET /api/works/:objectId hydrates a pending local catalog work on demand and persists the updated detail", async () => {
     const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-detail-hydration-"));
     const databasePath = path.join(tempDir, "catalog.sqlite");

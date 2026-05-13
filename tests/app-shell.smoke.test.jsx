@@ -35,11 +35,12 @@ function createFetchImpl({
   metClient,
   catalogDatabasePath = null,
   hydrationFetchImpl,
-  adminAuth = null
+  adminAuth = null,
+  workInfoGenerator = null
 } = {}) {
   const apiApp = metClient
-    ? createArtctlApp({ metClient, allowLegacyMetRuntime: true, adminAuth })
-    : createArtctlApp({ catalogDatabasePath, hydrationFetchImpl, adminAuth });
+    ? createArtctlApp({ metClient, allowLegacyMetRuntime: true, adminAuth, workInfoGenerator })
+    : createArtctlApp({ catalogDatabasePath, hydrationFetchImpl, adminAuth, workInfoGenerator });
   const cookieJar = new Map();
 
   function getCookieHeader() {
@@ -2463,6 +2464,183 @@ test("work viewer renders the preferred image and compact metadata with a Met li
     "href",
     "https://www.metmuseum.org/art/collection/search/45434"
   );
+});
+
+test("work viewer can request and render ai info for an art student", async () => {
+  const requests = [];
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Katsushika Hokusai",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  let resolveStudy;
+  const workInfoGenerator = {
+    explainWorkForArtStudent() {
+      return new Promise((resolve) => {
+        resolveStudy = resolve;
+      });
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, metClient, workInfoGenerator })} />
+  );
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  const viewer = image.closest("figure");
+
+  expect(viewer).not.toBeNull();
+  expect(screen.getByRole("button", { name: "Study it" })).toHaveTextContent("[study it]");
+
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+
+  expect(await screen.findByTestId("ai-braille-stream")).toBeInTheDocument();
+  expect(viewer).toContainElement(screen.getByTestId("ai-braille-stream"));
+  await waitFor(() => {
+    expect(typeof resolveStudy).toBe("function");
+  });
+
+  resolveStudy({
+    observe:
+      "The wave arcs over the boats, using scale contrast and repeated curves to focus attention.",
+    context:
+      "Hokusai made the print in Edo-period Japan, where landscape prints circulated as popular images.",
+    technique:
+      "Crisp contour and flat color make the composition legible while the repeated curve unifies the scene.",
+    sources: [
+      {
+        url: "https://www.metmuseum.org/art/collection/search/45434",
+        title: "The Great Wave | The Met"
+      },
+      {
+        url: "https://www.britannica.com/topic/The-Great-Wave-off-Kanagawa",
+        title: "The Great Wave off Kanagawa | Britannica"
+      }
+    ]
+  });
+
+  expect(await screen.findByText("observe")).toBeInTheDocument();
+  await waitFor(() => {
+    expect(screen.queryByTestId("ai-braille-stream")).toBeNull();
+  });
+  const studyOverlay = screen.getByLabelText("Study overlay");
+
+  expect(studyOverlay).not.toBeNull();
+  expect(viewer).toContainElement(studyOverlay);
+  expect(studyOverlay).toHaveClass("border");
+  expect(studyOverlay).toHaveClass("border-border");
+  expect(studyOverlay).toHaveClass("overflow-y-auto");
+  expect(studyOverlay).toHaveClass("max-h-[55%]");
+  expect(screen.queryByText("study")).not.toBeInTheDocument();
+  expect(screen.queryByText("look")).not.toBeInTheDocument();
+  expect(screen.getByText("observe")).toBeInTheDocument();
+  expect(screen.getByText("context")).toBeInTheDocument();
+  expect(screen.getByText("technique")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "The wave arcs over the boats, using scale contrast and repeated curves to focus attention."
+    )
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Hokusai made the print in Edo-period Japan, where landscape prints circulated as popular images."
+    )
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Crisp contour and flat color make the composition legible while the repeated curve unifies the scene."
+    )
+  ).toBeInTheDocument();
+  expect(screen.getByText("observe")).toHaveClass("text-[10px]");
+  expect(screen.getByText("observe")).toHaveClass("text-muted-foreground");
+  expect(screen.getByText("observe").parentElement).toHaveClass("grid");
+  expect(screen.getByText("observe").parentElement).toHaveClass("gap-1");
+  const sourceLinks = screen.getAllByRole("link", { name: "[src]" });
+
+  expect(sourceLinks).toHaveLength(2);
+  expect(sourceLinks[0]).toHaveAttribute(
+    "href",
+    "https://www.metmuseum.org/art/collection/search/45434"
+  );
+  expect(sourceLinks[1]).toHaveAttribute(
+    "href",
+    "https://www.britannica.com/topic/The-Great-Wave-off-Kanagawa"
+  );
+  expect(screen.getByRole("button", { name: "Close study overlay" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Close study overlay" }));
+
+  await waitFor(() => {
+    expect(screen.queryByText("observe")).not.toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+
+  expect(await screen.findByText("observe")).toBeInTheDocument();
+  expect(
+    requests.filter((request) => request === "POST /api/works/436121/ai-info")
+  ).toHaveLength(1);
+  expect(requests).toContain("POST /api/works/436121/ai-info");
+});
+
+test("study it does not start a second generation while a note already exists on the page", async () => {
+  const requests = [];
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Katsushika Hokusai",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  const workInfoGenerator = {
+    async explainWorkForArtStudent() {
+      return {
+        observe:
+          "The wave arcs over the boats, using scale contrast and repeated curves to focus attention.",
+        context:
+          "Hokusai made the print in Edo-period Japan, where landscape prints circulated as popular images.",
+        technique:
+          "Crisp contour and flat color make the composition legible while the repeated curve unifies the scene.",
+        sources: []
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, metClient, workInfoGenerator })} />
+  );
+
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+  expect(await screen.findByText("observe")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Close study overlay" }));
+  expect(await screen.findByRole("button", { name: "Study it" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+
+  expect(await screen.findByText("observe")).toBeInTheDocument();
+  expect(
+    requests.filter((request) => request === "POST /api/works/436121/ai-info")
+  ).toHaveLength(1);
 });
 
 test("direct entry to an image-backed work route shows inspection controls", async () => {

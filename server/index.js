@@ -1,7 +1,8 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createArtctlApp } from "./app.js";
-import { loadArtctlEnv, resolveAdminAuth, resolveCatalogDatabasePath } from "./local-env.js";
+import { loadArtctlEnv, resolveAdminAuth, resolveCatalogDatabasePath, resolveWorkAiConfig } from "./local-env.js";
+import { createWorkInfoGenerator } from "./work-ai.js";
 
 function resolveProductionServerOptions(processEnv = process.env) {
   const resolvedEnv = loadArtctlEnv(processEnv);
@@ -12,19 +13,21 @@ function resolveProductionServerOptions(processEnv = process.env) {
     spaHtmlPath: path.join(distDir, "index.html"),
     staticDir: distDir,
     catalogDatabasePath: resolveCatalogDatabasePath(processEnv),
-    adminAuth: resolveAdminAuth(processEnv)
+    adminAuth: resolveAdminAuth(processEnv),
+    workAiConfig: resolveWorkAiConfig(processEnv)
   };
 }
 
 export function createProductionArtctlApp(processEnv = process.env) {
-  const { spaHtmlPath, staticDir, catalogDatabasePath, adminAuth } =
+  const { spaHtmlPath, staticDir, catalogDatabasePath, adminAuth, workAiConfig } =
     resolveProductionServerOptions(processEnv);
 
   return createArtctlApp({
     spaHtmlPath,
     staticDir,
     catalogDatabasePath,
-    adminAuth
+    adminAuth,
+    workInfoGenerator: createWorkInfoGenerator(workAiConfig ?? undefined)
   });
 }
 

@@ -63,3 +63,17 @@ export function resolveAdminAuth(processEnv = process.env) {
     password
   };
 }
+
+export function resolveWorkAiConfig(processEnv = process.env) {
+  const resolvedEnv = loadArtctlEnv(processEnv);
+  const apiKey = resolvedEnv.OPENAI_API_KEY?.trim() ?? "";
+
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    apiKey,
+    model: resolvedEnv.ARTCTL_AI_MODEL?.trim() || "gpt-5.2"
+  };
+}
