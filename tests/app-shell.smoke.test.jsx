@@ -3808,6 +3808,20 @@ test("help route presents the current ARTCTL product copy", async () => {
   expect(within(helpPage).getByText("── STUDY WORKS ──")).toBeInTheDocument();
   expect(within(helpPage).getByText("[study it]")).toBeInTheDocument();
   expect(within(helpPage).getByText(/machine observation is not connoisseurship\./i)).toBeInTheDocument();
+  expect(within(helpPage).getByText("── BUYING PRINTS ──")).toBeInTheDocument();
+  expect(
+    within(helpPage).getByText(/that money helps cover the ongoing costs of running artctl\./i)
+  ).toBeInTheDocument();
+  expect(within(helpPage).getByText(/\[server costs\]/i)).toBeInTheDocument();
+  expect(within(helpPage).getByText(/\["study it"\]/i)).toBeInTheDocument();
+  expect(within(helpPage).getByText(/\[print service\]/i)).toBeInTheDocument();
+  expect(within(helpPage).getByText(/\[maintenance\]/i)).toBeInTheDocument();
+  expect(
+    within(helpPage).getByText(/purchasing a print goes a long way toward supporting the project\./i)
+  ).toBeInTheDocument();
+  expect(
+    within(helpPage).getByText(/working toward a fund that helps low-income communities, schools, and students get better access to art\./i)
+  ).toBeInTheDocument();
   expect(within(helpPage).getByText("── CURATED GALLERY ──")).toBeInTheDocument();
   expect(within(helpPage).getByText(/future plans include guest-curated collections/i)).toBeInTheDocument();
   expect(within(helpPage).getByText("── SEARCH ──")).toBeInTheDocument();
@@ -3840,11 +3854,13 @@ test("help route renders a clickable section index with hash links", async () =>
   await screen.findByRole("heading", { name: "Help" });
   const sectionNav = screen.getByRole("navigation", { name: "help sections" });
   const studyLink = screen.getByRole("link", { name: "[study works]" });
+  const printsLink = screen.getByRole("link", { name: "[buying prints]" });
   const sourceLink = screen.getByRole("link", { name: "[collection source]" });
   const aboutLink = screen.getByRole("link", { name: "[about me]" });
 
   expect(sectionNav).toBeInTheDocument();
   expect(studyLink).toHaveAttribute("href", "#study-works");
+  expect(printsLink).toHaveAttribute("href", "#buying-prints");
   expect(sourceLink).toHaveAttribute("href", "#collection-source");
   expect(aboutLink).toHaveAttribute("href", "#about-me");
 });

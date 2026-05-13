@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 const HELP_SECTIONS = [
   { id: "why-artctl-exists", title: "WHY ARTCTL EXISTS" },
   { id: "study-works", title: "STUDY WORKS" },
+  { id: "buying-prints", title: "BUYING PRINTS" },
   { id: "curated-gallery", title: "CURATED GALLERY" },
   { id: "search", title: "SEARCH" },
   { id: "system-design", title: "SYSTEM DESIGN" },
@@ -207,6 +208,38 @@ export function HelpPage() {
             <p className="text-xs text-muted-foreground">
               The goal is not automated expertise. The goal is to help users
               learn how to look more carefully.
+            </p>
+          </HelpSection>
+
+          <HelpSection id="buying-prints" title="BUYING PRINTS">
+            <p className="text-xs text-muted-foreground">
+              When print purchasing is enabled, that money helps cover the
+              ongoing costs of running ARTCTL.
+            </p>
+            <div className="space-y-1.5">
+              <Row
+                label="[server costs]"
+                desc="A portion goes toward hosting and keeping the site online."
+              />
+              <Row
+                label='["study it"]'
+                desc='A portion goes toward LLM calls that power "Study it" so visitors can learn more from art.'
+              />
+              <Row
+                label="[print service]"
+                desc="A portion goes to the actual print service for printing and shipping your order."
+              />
+              <Row
+                label="[maintenance]"
+                desc="The rest supports the software team maintaining ARTCTL over its lifetime."
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Purchasing a print goes a long way toward supporting the project.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              We are also working toward a fund that helps low-income
+              communities, schools, and students get better access to art.
             </p>
           </HelpSection>
 
