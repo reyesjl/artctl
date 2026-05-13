@@ -1058,7 +1058,7 @@ export function createSqliteCatalog({
 
         const nextObjectIds = rows.map((row) => row.objectId);
         const [movedObjectId] = nextObjectIds.splice(sourceIndex, 1);
-        const insertIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+        const insertIndex = targetIndex;
         nextObjectIds.splice(insertIndex, 0, movedObjectId);
 
         database.exec("BEGIN");

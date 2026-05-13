@@ -1,7 +1,7 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createArtctlApp } from "./app.js";
-import { loadArtctlEnv, resolveCatalogDatabasePath } from "./local-env.js";
+import { loadArtctlEnv, resolveAdminAuth, resolveCatalogDatabasePath } from "./local-env.js";
 
 function resolveProductionServerOptions(processEnv = process.env) {
   const resolvedEnv = loadArtctlEnv(processEnv);
@@ -11,17 +11,20 @@ function resolveProductionServerOptions(processEnv = process.env) {
     port: Number(resolvedEnv.PORT ?? 3000),
     spaHtmlPath: path.join(distDir, "index.html"),
     staticDir: distDir,
-    catalogDatabasePath: resolveCatalogDatabasePath(processEnv)
+    catalogDatabasePath: resolveCatalogDatabasePath(processEnv),
+    adminAuth: resolveAdminAuth(processEnv)
   };
 }
 
 export function createProductionArtctlApp(processEnv = process.env) {
-  const { spaHtmlPath, staticDir, catalogDatabasePath } = resolveProductionServerOptions(processEnv);
+  const { spaHtmlPath, staticDir, catalogDatabasePath, adminAuth } =
+    resolveProductionServerOptions(processEnv);
 
   return createArtctlApp({
     spaHtmlPath,
     staticDir,
-    catalogDatabasePath
+    catalogDatabasePath,
+    adminAuth
   });
 }
 

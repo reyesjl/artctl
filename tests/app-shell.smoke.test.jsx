@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { beforeEach, expect, test } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import httpMocks from "node-mocks-http";
 import { App } from "../src/App.jsx";
 import { createArtctlApp } from "../server/app.js";
@@ -34,11 +34,46 @@ function createFetchImpl({
   requestLog = [],
   metClient,
   catalogDatabasePath = null,
-  hydrationFetchImpl
+  hydrationFetchImpl,
+  adminAuth = null
 } = {}) {
   const apiApp = metClient
-    ? createArtctlApp({ metClient, allowLegacyMetRuntime: true })
-    : createArtctlApp({ catalogDatabasePath, hydrationFetchImpl });
+    ? createArtctlApp({ metClient, allowLegacyMetRuntime: true, adminAuth })
+    : createArtctlApp({ catalogDatabasePath, hydrationFetchImpl, adminAuth });
+  const cookieJar = new Map();
+
+  function getCookieHeader() {
+    if (cookieJar.size === 0) {
+      return "";
+    }
+
+    return Array.from(cookieJar.entries())
+      .map(([name, value]) => `${name}=${value}`)
+      .join("; ");
+  }
+
+  function applySetCookieHeader(setCookieHeader) {
+    for (const cookieHeader of []
+      .concat(setCookieHeader ?? [])
+      .filter(Boolean)) {
+      const cookieAssignment = String(cookieHeader).split(";", 1)[0];
+      const separatorIndex = cookieAssignment.indexOf("=");
+
+      if (separatorIndex < 1) {
+        continue;
+      }
+
+      const name = cookieAssignment.slice(0, separatorIndex).trim();
+      const value = cookieAssignment.slice(separatorIndex + 1).trim();
+
+      if (!value) {
+        cookieJar.delete(name);
+        continue;
+      }
+
+      cookieJar.set(name, value);
+    }
+  }
 
   return async function fetchImpl(resource, init = {}) {
     const url = new URL(resource, "http://artctl.test");
@@ -51,7 +86,11 @@ function createFetchImpl({
       method,
       url: url.pathname,
       query: Object.fromEntries(url.searchParams.entries()),
-      body: init.body ? JSON.parse(init.body) : undefined
+      body: init.body ? JSON.parse(init.body) : undefined,
+      headers: {
+        ...(init.headers ?? {}),
+        ...(getCookieHeader() ? { cookie: getCookieHeader() } : {})
+      }
     });
     const response = httpMocks.createResponse({ eventEmitter: EventEmitter });
 
@@ -60,6 +99,8 @@ function createFetchImpl({
       response.on("error", reject);
       apiApp.handle(request, response, reject);
     });
+
+    applySetCookieHeader(response.getHeader("Set-Cookie"));
 
     return {
       ok: response.statusCode >= 200 && response.statusCode < 300,
@@ -110,6 +151,16 @@ function installLocalStorage() {
   });
 }
 
+function expectAdminGalleryCardOrder(card, order) {
+  const orderBadge = within(card).getByText(String(order));
+
+  expect(orderBadge).toHaveClass("absolute");
+  expect(orderBadge).toHaveClass("bottom-3");
+  expect(orderBadge).toHaveClass("right-3");
+  expect(orderBadge).toHaveClass("text-xs");
+  expect(orderBadge).toHaveClass("text-muted-foreground");
+}
+
 beforeEach(() => {
   cleanup();
   installLocalStorage();
@@ -147,6 +198,26 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByText("ARTCTL", { selector: ".brand" })).toHaveClass("text-sm");
   expect(screen.getByText("ARTCTL", { selector: ".brand" })).toHaveClass("font-bold");
   expect(nav).toHaveClass("text-xs");
+});
+
+test("shared navigation hides the admin link when admin auth is configured but no admin session exists", async () => {
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        adminAuth: {
+          username: "admin",
+          password: "secret"
+        }
+      })}
+    />
+  );
+
+  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
 });
 
 test("homepage uses a wider route frame than standard pages", async () => {
@@ -197,7 +268,7 @@ test.each([
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
 });
 
 test("search route renders its terminal shell inside the shared app shell", async () => {
@@ -212,7 +283,7 @@ test("search route renders its terminal shell inside the shared app shell", asyn
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
 });
 
 test("homepage route renders its shell without a page title", async () => {
@@ -226,18 +297,142 @@ test("homepage route renders its shell without a page title", async () => {
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
 });
 
-test("legacy /admin/gallery route no longer opens the curated group editor", async () => {
-  window.history.pushState({}, "", "/admin/gallery");
+test("admin routes show a login form when admin auth is configured and no admin session exists", async () => {
+  window.history.pushState({}, "", "/admin");
 
-  render(<App fetchImpl={fetchImpl} />);
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        adminAuth: {
+          username: "admin",
+          password: "secret"
+        }
+      })}
+    />
+  );
 
-  expect(await screen.findByText("ARTCTL", { selector: ".brand" })).toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "Admin Gallery" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "Homepage Gallery" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("main")).not.toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Admin Login" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Username")).toBeInTheDocument();
+  expect(screen.getByLabelText("Password")).toBeInTheDocument();
+  const form = screen.getByRole("button", { name: "[submit]" }).closest("form");
+  const usernameInput = screen.getByLabelText("Username");
+  const passwordInput = screen.getByLabelText("Password");
+
+  expect(form).toHaveClass("border");
+  expect(form).toHaveClass("border-border");
+  expect(form).toHaveClass("bg-card");
+  expect(form).toHaveClass("text-card-foreground");
+  expect(form).toHaveClass("px-3");
+  expect(form).toHaveClass("py-3");
+  expect(form).toHaveClass("space-y-2");
+  expect(form).toHaveClass("text-sm");
+  expect(form).toHaveClass("font-mono");
+  expect(usernameInput).toHaveAttribute("placeholder", "username");
+  expect(passwordInput).toHaveAttribute("placeholder", "password");
+  expect(usernameInput).toHaveClass("w-full");
+  expect(usernameInput).toHaveClass("bg-transparent");
+  expect(usernameInput).toHaveClass("border");
+  expect(usernameInput).toHaveClass("border-border");
+  expect(usernameInput).toHaveClass("px-2");
+  expect(usernameInput).toHaveClass("py-1");
+  expect(passwordInput).toHaveClass("w-full");
+  expect(passwordInput).toHaveClass("bg-transparent");
+  expect(passwordInput).toHaveClass("border");
+  expect(passwordInput).toHaveClass("border-border");
+  expect(passwordInput).toHaveClass("px-2");
+  expect(passwordInput).toHaveClass("py-1");
+  expect(screen.queryByRole("heading", { name: "Admin" })).not.toBeInTheDocument();
+});
+
+test("admin login unlocks the protected admin route", async () => {
+  window.history.pushState({}, "", "/admin");
+
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        adminAuth: {
+          username: "admin",
+          password: "secret"
+        }
+      })}
+    />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Admin Login" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Username"), {
+    target: { value: "admin" }
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "secret" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[submit]" }));
+
+  expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "[curated groups]" })).toBeInTheDocument();
+});
+
+test("shared navigation shows the admin link after admin login", async () => {
+  window.history.pushState({}, "", "/admin");
+
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        adminAuth: {
+          username: "admin",
+          password: "secret"
+        }
+      })}
+    />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Admin Login" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Username"), {
+    target: { value: "admin" }
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "secret" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[submit]" }));
+
+  expect(await screen.findByRole("link", { name: "[admin]" })).toBeInTheDocument();
+});
+
+test("admin routes provide a logout control that ends the admin session", async () => {
+  window.history.pushState({}, "", "/admin");
+
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        adminAuth: {
+          username: "admin",
+          password: "secret"
+        }
+      })}
+    />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Admin Login" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Username"), {
+    target: { value: "admin" }
+  });
+  fireEvent.change(screen.getByLabelText("Password"), {
+    target: { value: "secret" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[submit]" }));
+
+  expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[logout]" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "[logout]" }));
+
+  expect(await screen.findByRole("heading", { name: "Admin Login" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
 });
 
 test("curated groups route renders a selectable text list of groups", async () => {
@@ -657,7 +852,7 @@ test("admin landing route lets me choose curated groups management", async () =>
   expect(curatedGroupsLink).not.toHaveClass("p-4");
   expect(curatedGroupsLink).not.toHaveClass("border");
   expect(screen.getByText("Manage editorial groups and homepage curation.")).toBeInTheDocument();
-  expect(requests).toEqual(["/api/app-shell"]);
+  expect(requests).toEqual(["/api/app-shell", "/api/admin/session", "/api/admin/session"]);
 });
 
 test("admin gallery route can add a local object id into the curated gallery list", async () => {
@@ -699,8 +894,56 @@ test("admin gallery route can add a local object id into the curated gallery lis
   fireEvent.submit(addButton.closest("form"));
 
   expect(await screen.findByText("Curated Work 25")).toBeInTheDocument();
-  expect(screen.getByText("1 · 25 · pending")).toBeInTheDocument();
+  const card = screen.getByText("Curated Work 25").closest("li");
+  const orderBadge = within(card).getByText("1");
+  const removeButton = within(card).getByRole("button", { name: "Remove Curated Work 25" });
+
+  expect(orderBadge).toHaveClass("absolute");
+  expect(orderBadge).toHaveClass("bottom-3");
+  expect(orderBadge).toHaveClass("right-3");
+  expect(orderBadge).toHaveClass("text-xs");
+  expect(orderBadge).toHaveClass("text-muted-foreground");
+  expect(removeButton).toHaveClass("absolute");
+  expect(removeButton).toHaveClass("bottom-3");
+  expect(removeButton).toHaveClass("left-3");
+  expect(screen.getByText("25 · pending")).toBeInTheDocument();
   expect(requests).toContain("POST /api/admin/gallery");
+});
+
+test("group detail route truncates curated work titles like the gallery cards", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const csvPath = path.join(tempDir, "admin-gallery-title-clamp.csv");
+
+  writeFileSync(
+    csvPath,
+    "Object ID,Department,Title,Artist Display Name,Object Date,Object Name,Medium,Is Public Domain\n" +
+      "25,European Paintings,An Extremely Long Curated Work Title That Should Clamp Across Two Lines In The Admin Gallery Card,Artist 25,1900,Painting,Oil on canvas,True\n",
+    "utf8"
+  );
+
+  expect(runCatalogImport({ csvPath, databasePath }).ok).toBe(true);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(<App fetchImpl={createFetchImpl({ catalogDatabasePath: databasePath })} />);
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Object ID"), {
+    target: { value: "25" }
+  });
+  fireEvent.submit(screen.getByRole("button", { name: "Add to Gallery" }).closest("form"));
+
+  const title = await screen.findByText(
+    "An Extremely Long Curated Work Title That Should Clamp Across Two Lines In The Admin Gallery Card"
+  );
+
+  expect(title).toHaveClass("line-clamp-2");
+  expect(title).toHaveClass("text-sm");
+  expect(title).toHaveClass("text-foreground");
+  expect(screen.getByText("Artist 25")).toHaveClass("text-xs");
+  expect(screen.getByText("Artist 25")).toHaveClass("text-muted-foreground");
 });
 
 test("group detail route can add multiple object ids from a comma-separated list", async () => {
@@ -738,9 +981,12 @@ test("group detail route can add multiple object ids from a comma-separated list
   expect(await screen.findByText("Curated Work 25")).toBeInTheDocument();
   expect(await screen.findByText("Curated Work 26")).toBeInTheDocument();
   expect(await screen.findByText("Curated Work 27")).toBeInTheDocument();
-  expect(screen.getByText("1 · 25 · pending")).toBeInTheDocument();
-  expect(screen.getByText("2 · 26 · pending")).toBeInTheDocument();
-  expect(screen.getByText("3 · 27 · pending")).toBeInTheDocument();
+  expect(screen.getByText("25 · pending")).toBeInTheDocument();
+  expect(screen.getByText("26 · pending")).toBeInTheDocument();
+  expect(screen.getByText("27 · pending")).toBeInTheDocument();
+  expectAdminGalleryCardOrder(screen.getByText("Curated Work 25").closest("li"), 1);
+  expectAdminGalleryCardOrder(screen.getByText("Curated Work 26").closest("li"), 2);
+  expectAdminGalleryCardOrder(screen.getByText("Curated Work 27").closest("li"), 3);
   expect(requests.filter((request) => request === "POST /api/admin/gallery")).toHaveLength(3);
 });
 
@@ -776,7 +1022,8 @@ test("admin gallery route can remove a curated item and reflow the remaining pos
     expect(screen.queryByText("Mantel")).not.toBeInTheDocument();
   });
   expect(screen.getByText('The "Shipwreck Medal"')).toBeInTheDocument();
-  expect(screen.getByText("1 · 5046 · pending")).toBeInTheDocument();
+  expect(screen.getByText("5046 · pending")).toBeInTheDocument();
+  expectAdminGalleryCardOrder(screen.getByText('The "Shipwreck Medal"').closest("li"), 1);
   expect(requests).toContain("DELETE /api/admin/gallery/4926");
 });
 
@@ -814,8 +1061,51 @@ test("admin gallery route can drag a curated item onto another card and update t
     expect(reorderedCards[0]).toHaveTextContent('The "Shipwreck Medal"');
     expect(reorderedCards[1]).toHaveTextContent("Mantel");
   });
-  expect(screen.getByText("1 · 5046 · pending")).toBeInTheDocument();
-  expect(screen.getByText("2 · 4926 · pending")).toBeInTheDocument();
+  expect(screen.getByText("5046 · pending")).toBeInTheDocument();
+  expect(screen.getByText("4926 · pending")).toBeInTheDocument();
+  expectAdminGalleryCardOrder(screen.getByText('The "Shipwreck Medal"').closest("li"), 1);
+  expectAdminGalleryCardOrder(screen.getByText("Mantel").closest("li"), 2);
+  expect(requests).toContain("PATCH /api/admin/gallery/reorder");
+});
+
+test("admin gallery route can drag a curated item downward onto the next card and update the displayed order", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+  await seedAdminGallery(createFetchImpl({ catalogDatabasePath: databasePath }), [4926, 5046]);
+
+  window.history.pushState({}, "", "/admin/curated-groups/homepage");
+
+  render(
+    <App fetchImpl={createFetchImpl({ requestLog: requests, catalogDatabasePath: databasePath })} />
+  );
+
+  expect(await screen.findByRole("heading", { name: "Homepage Gallery" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  const cards = screen.getAllByRole("listitem");
+  const draggedCard = cards.find((card) => card.textContent.includes("Mantel"));
+  const targetCard = cards.find((card) => card.textContent.includes('The "Shipwreck Medal"'));
+
+  fireEvent.dragStart(draggedCard);
+  fireEvent.dragOver(targetCard);
+  fireEvent.drop(targetCard);
+
+  await waitFor(() => {
+    const reorderedCards = screen.getAllByRole("listitem");
+    expect(reorderedCards[0]).toHaveTextContent('The "Shipwreck Medal"');
+    expect(reorderedCards[1]).toHaveTextContent("Mantel");
+  });
+  expect(screen.getByText("5046 · pending")).toBeInTheDocument();
+  expect(screen.getByText("4926 · pending")).toBeInTheDocument();
+  expectAdminGalleryCardOrder(screen.getByText('The "Shipwreck Medal"').closest("li"), 1);
+  expectAdminGalleryCardOrder(screen.getByText("Mantel").closest("li"), 2);
   expect(requests).toContain("PATCH /api/admin/gallery/reorder");
 });
 
@@ -930,8 +1220,9 @@ test("admin gallery route can manually hydrate a curated item and update its car
   fireEvent.click(hydrateButton);
 
   await waitFor(() => {
-    expect(screen.getByText("2 · 5046 · hydrated")).toBeInTheDocument();
+    expect(screen.getByText("5046 · hydrated")).toBeInTheDocument();
   });
+  expectAdminGalleryCardOrder(screen.getByText('The "Shipwreck Medal"').closest("li"), 2);
   expect(screen.getByRole("img", { name: 'The "Shipwreck Medal"' })).toHaveAttribute(
     "src",
     "https://images.metmuseum.org/small/5046.jpg"
@@ -1667,7 +1958,7 @@ test("search route shows an empty state before any query is submitted", async ()
   expect(await screen.findByText("> type search")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   await waitFor(() => {
-    expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
+    expect(requests).toEqual(["/api/app-shell", "/api/admin/session", "/api/search/departments"]);
   });
 });
 
@@ -1972,7 +2263,7 @@ test("submitting a whitespace-only query keeps the search route in its empty sta
   fireEvent.click(screen.getByRole("button", { name: "[search]" }));
 
   expect(window.location.search).toBe("");
-  expect(requests).toEqual(["/api/app-shell", "/api/search/departments"]);
+  expect(requests).toEqual(["/api/app-shell", "/api/admin/session", "/api/search/departments"]);
 });
 
 test("loading a populated search URL restores the same search state end to end", async () => {

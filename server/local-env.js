@@ -48,3 +48,18 @@ export function loadArtctlEnv(processEnv = process.env) {
 export function resolveCatalogDatabasePath(processEnv = process.env) {
   return loadArtctlEnv(processEnv).CATALOG_DATABASE_PATH ?? null;
 }
+
+export function resolveAdminAuth(processEnv = process.env) {
+  const resolvedEnv = loadArtctlEnv(processEnv);
+  const username = resolvedEnv.ARTCTL_ADMIN_USERNAME?.trim() ?? "";
+  const password = resolvedEnv.ARTCTL_ADMIN_PASSWORD ?? "";
+
+  if (!username || !password) {
+    return null;
+  }
+
+  return {
+    username,
+    password
+  };
+}

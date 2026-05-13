@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
+import { BrowserRouter, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AdminPage } from "./pages/AdminPage.jsx";
 import { AdminGalleryPage } from "./pages/AdminGalleryPage.jsx";
 import { CreateCuratedGroupPage } from "./pages/CreateCuratedGroupPage.jsx";
@@ -12,7 +12,178 @@ import { WorkPage } from "./pages/WorkPage.jsx";
 import { ThemeProvider } from "./theme-provider.jsx";
 import "./styles.css";
 
-function AppShell({ shell, apiBaseUrl, fetchImpl }) {
+function AdminLoginPage({ apiBaseUrl, fetchImpl, onAuthenticated }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState("idle");
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setStatus("submitting");
+    setError("");
+
+    try {
+      const response = await fetchImpl(`${apiBaseUrl}/api/admin/login`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(data.error || "Unable to log in.");
+        setStatus("idle");
+        return;
+      }
+
+      onAuthenticated();
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Unable to log in.");
+      setStatus("idle");
+    }
+  }
+
+  return (
+    <main className="mx-auto w-full p-3 sm:p-4">
+      <div className="max-w-md mx-auto pt-10">
+        <div aria-level="1" role="heading" className="sr-only">
+          Admin Login
+        </div>
+        <form
+          className="border border-border bg-card text-card-foreground px-3 py-3 space-y-2 text-sm font-mono"
+          onSubmit={handleSubmit}
+        >
+          <div>log in</div>
+          <label htmlFor="admin-username" className="sr-only">
+            Username
+          </label>
+          <input
+            id="admin-username"
+            name="username"
+            type="text"
+            placeholder="username"
+            autoComplete="username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            className="w-full bg-transparent border border-border px-2 py-1 text-foreground placeholder:text-muted-foreground focus:outline-none"
+          />
+          <label htmlFor="admin-password" className="sr-only">
+            Password
+          </label>
+          <input
+            id="admin-password"
+            name="password"
+            type="password"
+            placeholder="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            className="w-full bg-transparent border border-border px-2 py-1 text-foreground placeholder:text-muted-foreground focus:outline-none"
+          />
+          {error ? (
+            <div role="alert" className="text-destructive">
+              {error}
+            </div>
+          ) : null}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              className="text-muted-foreground hover:text-foreground"
+              disabled={status === "submitting"}
+            >
+              [submit]
+            </button>
+          </div>
+        </form>
+      </div>
+    </main>
+  );
+}
+
+function AdminRoute({
+  apiBaseUrl,
+  fetchImpl,
+  children,
+  onAuthenticated,
+  isAdminAuthenticated
+}) {
+  const [status, setStatus] = useState("loading");
+  const [authConfigured, setAuthConfigured] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadAdminSession() {
+      const response = await fetchImpl(`${apiBaseUrl}/api/admin/session`);
+      const data = await response.json();
+
+      if (cancelled) {
+        return;
+      }
+
+      setAuthConfigured(Boolean(data.authConfigured));
+      setStatus(data.authConfigured && !data.authenticated ? "unauthenticated" : "authenticated");
+    }
+
+    loadAdminSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, fetchImpl]);
+
+  useEffect(() => {
+    if (!authConfigured) {
+      return;
+    }
+
+    setStatus(isAdminAuthenticated ? "authenticated" : "unauthenticated");
+  }, [authConfigured, isAdminAuthenticated]);
+
+  if (status === "loading") {
+    return <p>Checking admin session...</p>;
+  }
+
+  if (status === "unauthenticated" && authConfigured) {
+    return (
+      <AdminLoginPage
+        apiBaseUrl={apiBaseUrl}
+        fetchImpl={fetchImpl}
+        onAuthenticated={() => {
+          setStatus("authenticated");
+          onAuthenticated?.();
+        }}
+      />
+    );
+  }
+
+  return children;
+}
+
+function AppShell({
+  shell,
+  apiBaseUrl,
+  fetchImpl,
+  adminSession,
+  onAdminAuthenticated,
+  onAdminLoggedOut
+}) {
+  const location = useLocation();
+  const navigation = shell.navigation.filter(
+    (item) => item.href !== "/admin" || adminSession.authenticated
+  );
+  const showAdminLogout = adminSession.authenticated && location.pathname.startsWith("/admin");
+
+  async function handleAdminLogout() {
+    await fetchImpl(`${apiBaseUrl}/api/admin/logout`, {
+      method: "POST"
+    });
+    onAdminLoggedOut?.();
+  }
+
   return (
     <div className="grid min-h-screen grid-rows-[auto_1fr_auto] bg-background font-mono text-foreground">
       <header className="app-header-strip flex flex-wrap items-center gap-x-4 gap-y-3 bg-background px-4 py-2 text-foreground">
@@ -20,7 +191,7 @@ function AppShell({ shell, apiBaseUrl, fetchImpl }) {
           <strong className="brand text-sm font-bold text-primary">{shell.brand}</strong>
         </div>
         <nav className="flex flex-wrap gap-2 text-xs" aria-label="Primary">
-          {shell.navigation.map((item) => (
+          {navigation.map((item) => (
             <NavLink
               key={item.href}
               to={item.href}
@@ -37,6 +208,15 @@ function AppShell({ shell, apiBaseUrl, fetchImpl }) {
             </NavLink>
           ))}
         </nav>
+        {showAdminLogout ? (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={handleAdminLogout}
+          >
+            [logout]
+          </button>
+        ) : null}
       </header>
       <Routes>
         <Route
@@ -53,19 +233,55 @@ function AppShell({ shell, apiBaseUrl, fetchImpl }) {
         />
         <Route
           path="/admin"
-          element={<AdminPage />}
+          element={
+            <AdminRoute
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              onAuthenticated={onAdminAuthenticated}
+              isAdminAuthenticated={adminSession.authenticated}
+            >
+              <AdminPage />
+            </AdminRoute>
+          }
         />
         <Route
           path="/admin/curated-groups"
-          element={<CuratedGroupsPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+          element={
+            <AdminRoute
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              onAuthenticated={onAdminAuthenticated}
+              isAdminAuthenticated={adminSession.authenticated}
+            >
+              <CuratedGroupsPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />
+            </AdminRoute>
+          }
         />
         <Route
           path="/admin/curated-groups/new"
-          element={<CreateCuratedGroupPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+          element={
+            <AdminRoute
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              onAuthenticated={onAdminAuthenticated}
+              isAdminAuthenticated={adminSession.authenticated}
+            >
+              <CreateCuratedGroupPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />
+            </AdminRoute>
+          }
         />
         <Route
           path="/admin/curated-groups/:groupSlug"
-          element={<AdminGalleryPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+          element={
+            <AdminRoute
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              onAuthenticated={onAdminAuthenticated}
+              isAdminAuthenticated={adminSession.authenticated}
+            >
+              <AdminGalleryPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />
+            </AdminRoute>
+          }
         />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/theme" element={<ThemesPage />} />
@@ -79,16 +295,24 @@ function AppShell({ shell, apiBaseUrl, fetchImpl }) {
 
 export function App({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [shell, setShell] = useState(null);
+  const [adminSession, setAdminSession] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadShell() {
-      const response = await fetchImpl(`${apiBaseUrl}/api/app-shell`);
-      const data = await response.json();
+      const [shellResponse, adminSessionResponse] = await Promise.all([
+        fetchImpl(`${apiBaseUrl}/api/app-shell`),
+        fetchImpl(`${apiBaseUrl}/api/admin/session`)
+      ]);
+      const [shellData, adminSessionData] = await Promise.all([
+        shellResponse.json(),
+        adminSessionResponse.json()
+      ]);
 
       if (!cancelled) {
-        setShell(data);
+        setShell(shellData);
+        setAdminSession(adminSessionData);
       }
     }
 
@@ -101,11 +325,28 @@ export function App({ apiBaseUrl = "", fetchImpl = fetch }) {
 
   return (
     <ThemeProvider>
-      {!shell ? (
+      {!shell || !adminSession ? (
         <p>Booting ARTCTL...</p>
       ) : (
         <BrowserRouter>
-          <AppShell shell={shell} apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />
+          <AppShell
+            shell={shell}
+            apiBaseUrl={apiBaseUrl}
+            fetchImpl={fetchImpl}
+            adminSession={adminSession}
+            onAdminAuthenticated={() => {
+              setAdminSession((currentSession) => ({
+                ...(currentSession ?? {}),
+                authenticated: true
+              }));
+            }}
+            onAdminLoggedOut={() => {
+              setAdminSession((currentSession) => ({
+                ...(currentSession ?? {}),
+                authenticated: false
+              }));
+            }}
+          />
         </BrowserRouter>
       )}
     </ThemeProvider>

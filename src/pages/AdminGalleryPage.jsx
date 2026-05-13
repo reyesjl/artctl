@@ -253,7 +253,7 @@ export function AdminGalleryPage({
               <li
                 key={item.objectId}
                 className={[
-                  "overflow-hidden border border-border bg-card text-card-foreground",
+                  "relative overflow-hidden border border-border bg-card text-card-foreground",
                   dropTargetObjectId === item.objectId ? "admin-gallery-drop-target" : ""
                 ]
                   .filter(Boolean)
@@ -284,13 +284,13 @@ export function AdminGalleryPage({
                 ) : (
                   <div className="block aspect-[4/3] w-full bg-muted" />
                 )}
-                <div className="grid gap-1 p-3">
+                <div className="grid gap-1 p-3 pb-10">
                   <p className="text-xs text-muted-foreground">
                     {dropTargetObjectId === item.objectId ? "Drop here" : "Drag to reorder"}
                   </p>
-                  <strong>{item.title}</strong>
-                  <p>{item.artist}</p>
-                  <p>{`${item.position} · ${item.objectId} · ${item.hydrationStatus}`}</p>
+                  <strong className="line-clamp-2 text-sm text-foreground">{item.title}</strong>
+                  <p className="text-xs text-muted-foreground">{item.artist}</p>
+                  <p>{`${item.objectId} · ${item.hydrationStatus}`}</p>
                   {item.hydrationStatus !== "hydrated" ? (
                     <button
                       aria-label={`Hydrate ${item.title}`}
@@ -303,13 +303,16 @@ export function AdminGalleryPage({
                   ) : null}
                   <button
                     aria-label={`Remove ${item.title}`}
-                    className="text-action justify-self-start"
+                    className="absolute bottom-3 left-3 text-action"
                     type="button"
                     onClick={() => handleRemove(item.objectId)}
                   >
                     [remove]
                   </button>
                 </div>
+                <p className="absolute bottom-3 right-3 text-xs text-muted-foreground">
+                  {item.position}
+                </p>
               </li>
             ))}
           </ul>

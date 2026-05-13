@@ -118,4 +118,18 @@ describe("server index startup", () => {
       ]
     });
   });
+
+  test("createProductionArtctlApp loads admin auth from environment", async () => {
+    const app = createProductionArtctlApp({
+      ARTCTL_ADMIN_USERNAME: "admin",
+      ARTCTL_ADMIN_PASSWORD: "secret"
+    });
+    const response = await makeRequest("/api/admin/session", app);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      authenticated: false,
+      authConfigured: true
+    });
+  });
 });

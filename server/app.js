@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import express from "express";
@@ -55,6 +56,31 @@ function ensureCatalogReady(response, catalog) {
   return false;
 }
 
+function parseCookieHeader(headerValue) {
+  const cookies = new Map();
+
+  for (const part of String(headerValue ?? "").split(";")) {
+    const trimmedPart = part.trim();
+
+    if (!trimmedPart) {
+      continue;
+    }
+
+    const separatorIndex = trimmedPart.indexOf("=");
+
+    if (separatorIndex < 1) {
+      continue;
+    }
+
+    cookies.set(
+      trimmedPart.slice(0, separatorIndex).trim(),
+      trimmedPart.slice(separatorIndex + 1).trim()
+    );
+  }
+
+  return cookies;
+}
+
 export function createArtctlApp(options = {}) {
   const {
     metClient = createMetApiClient({ curatedGalleryRecords }),
@@ -62,6 +88,7 @@ export function createArtctlApp(options = {}) {
     spaHtmlPath = defaultSpaHtmlPath,
     staticDir = null,
     catalogDatabasePath = null,
+    adminAuth = null,
     hydrationFetchImpl = fetch,
     hydrationSleepImpl,
     hydrationRandomImpl,
@@ -74,8 +101,38 @@ export function createArtctlApp(options = {}) {
       : createUninitializedCatalog();
   const catalog = Object.hasOwn(options, "catalog") ? (options.catalog ?? null) : defaultCatalog;
   const app = express();
+  const adminSessions = new Set();
+  const adminAuthEnabled = Boolean(adminAuth?.username && adminAuth?.password);
 
   app.use(express.json());
+
+  function createAdminSession() {
+    const sessionId = randomBytes(24).toString("hex");
+    adminSessions.add(sessionId);
+    return sessionId;
+  }
+
+  function hasAdminSession(request) {
+    if (!adminAuthEnabled) {
+      return true;
+    }
+
+    const cookies = parseCookieHeader(request.headers.cookie);
+    const sessionId = cookies.get("artctl_admin_session");
+
+    return Boolean(sessionId && adminSessions.has(sessionId));
+  }
+
+  function requireAdminAuth(request, response, next) {
+    if (hasAdminSession(request)) {
+      next();
+      return;
+    }
+
+    response.status(401).json({
+      error: "Admin authentication required."
+    });
+  }
 
   app.get("/api/app-shell", (_request, response) => {
     response.json({
@@ -90,6 +147,57 @@ export function createArtctlApp(options = {}) {
       ]
     });
   });
+
+  app.post("/api/admin/login", (request, response) => {
+    if (!adminAuthEnabled) {
+      response.status(501).json({
+        error: "Admin authentication is not configured."
+      });
+      return;
+    }
+
+    const username = String(request.body?.username ?? "").trim();
+    const password = String(request.body?.password ?? "");
+
+    if (username !== adminAuth.username || password !== adminAuth.password) {
+      response.status(401).json({
+        error: "Invalid admin credentials."
+      });
+      return;
+    }
+
+    const sessionId = createAdminSession();
+    response.setHeader("Set-Cookie", `artctl_admin_session=${sessionId}; Path=/; HttpOnly; SameSite=Lax`);
+    response.json({
+      ok: true
+    });
+  });
+
+  app.get("/api/admin/session", (request, response) => {
+    response.json({
+      authenticated: adminAuthEnabled ? hasAdminSession(request) : false,
+      authConfigured: adminAuthEnabled
+    });
+  });
+
+  app.post("/api/admin/logout", (request, response) => {
+    const cookies = parseCookieHeader(request.headers.cookie);
+    const sessionId = cookies.get("artctl_admin_session");
+
+    if (sessionId) {
+      adminSessions.delete(sessionId);
+    }
+
+    response.setHeader(
+      "Set-Cookie",
+      "artctl_admin_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+    );
+    response.json({
+      ok: true
+    });
+  });
+
+  app.use("/api/admin", requireAdminAuth);
 
   app.get("/api/search", async (request, response) => {
     if (!ensureCatalogReady(response, catalog)) {

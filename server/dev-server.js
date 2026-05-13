@@ -3,23 +3,25 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { createServer as createViteServer } from "vite";
 import { createArtctlApp } from "./app.js";
-import { loadArtctlEnv, resolveCatalogDatabasePath } from "./local-env.js";
+import { loadArtctlEnv, resolveAdminAuth, resolveCatalogDatabasePath } from "./local-env.js";
 
 function resolveDevServerOptions(processEnv = process.env) {
   const resolvedEnv = loadArtctlEnv(processEnv);
 
   return {
     port: Number(resolvedEnv.PORT ?? 3000),
-    catalogDatabasePath: resolveCatalogDatabasePath(processEnv)
+    catalogDatabasePath: resolveCatalogDatabasePath(processEnv),
+    adminAuth: resolveAdminAuth(processEnv)
   };
 }
 
 export function createDevArtctlApp(processEnv = process.env) {
-  const { catalogDatabasePath } = resolveDevServerOptions(processEnv);
+  const { catalogDatabasePath, adminAuth } = resolveDevServerOptions(processEnv);
 
   return createArtctlApp({
     serveSpa: false,
-    catalogDatabasePath
+    catalogDatabasePath,
+    adminAuth
   });
 }
 

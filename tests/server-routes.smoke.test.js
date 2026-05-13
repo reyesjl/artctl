@@ -18,7 +18,8 @@ async function makeRequest(url, targetApp = app, { method = "GET", body = null }
   const request = httpMocks.createRequest({
     method,
     url,
-    body
+    body,
+    headers: {}
   });
   const response = httpMocks.createResponse({ eventEmitter: EventEmitter });
 
@@ -87,6 +88,90 @@ describe("SPA route refresh", () => {
 });
 
 describe("configured SQLite catalog runtime", () => {
+  test("GET /api/admin/curated-groups rejects unauthenticated access when admin auth is configured", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      adminAuth: {
+        username: "admin",
+        password: "secret"
+      }
+    });
+    const response = await makeRequest("/api/admin/curated-groups", adminApp);
+
+    expect(response.statusCode).toBe(401);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Admin authentication required."
+    });
+  });
+
+  test("POST /api/admin/login creates an admin session that unlocks protected admin routes", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      adminAuth: {
+        username: "admin",
+        password: "secret"
+      }
+    });
+    const loginResponse = await makeRequest("/api/admin/login", adminApp, {
+      method: "POST",
+      body: {
+        username: "admin",
+        password: "secret"
+      }
+    });
+
+    expect(loginResponse.statusCode).toBe(200);
+    const sessionCookie = loginResponse.getHeader("Set-Cookie");
+    expect(sessionCookie).toEqual(expect.stringContaining("artctl_admin_session="));
+
+    const authenticatedRequest = httpMocks.createRequest({
+      method: "GET",
+      url: "/api/admin/curated-groups",
+      headers: {
+        cookie: sessionCookie
+      }
+    });
+    const authenticatedResponse = httpMocks.createResponse({ eventEmitter: EventEmitter });
+
+    await new Promise((resolve, reject) => {
+      authenticatedResponse.on("end", resolve);
+      authenticatedResponse.on("error", reject);
+      adminApp.handle(authenticatedRequest, authenticatedResponse, reject);
+    });
+
+    expect(authenticatedResponse.statusCode).toBe(200);
+    expect(JSON.parse(authenticatedResponse._getData())).toEqual({
+      results: [
+        {
+          slug: "homepage",
+          name: "Homepage Gallery",
+          objectCount: 0,
+          isHomepageFeatured: true
+        }
+      ]
+    });
+  });
+
   test("GET /api/search serves local catalog results from a configured SQLite database path", async () => {
     const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
     const databasePath = path.join(tempDir, "catalog.sqlite");
@@ -726,6 +811,58 @@ describe("configured SQLite catalog runtime", () => {
     const listResponse = await makeRequest("/api/admin/gallery", adminApp);
 
     expect(JSON.parse(listResponse._getData())).toEqual({
+      results: [
+        {
+          objectId: 5046,
+          position: 1,
+          title: 'The "Shipwreck Medal"',
+          artist: "Salathiel Ellis",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        },
+        {
+          objectId: 4926,
+          position: 2,
+          title: "Mantel",
+          artist: "Unknown",
+          imageUrl: "",
+          hydrationStatus: "pending"
+        }
+      ]
+    });
+  });
+
+  test("PATCH /api/admin/gallery/reorder moves a curated item downward when dropped onto the next card", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-sqlite-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({ catalogDatabasePath: databasePath });
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 4926 } }))
+        .statusCode
+    ).toBe(201);
+    expect(
+      (await makeRequest("/api/admin/gallery", adminApp, { method: "POST", body: { objectId: 5046 } }))
+        .statusCode
+    ).toBe(201);
+    const response = await makeRequest("/api/admin/gallery/reorder", adminApp, {
+      method: "PATCH",
+      body: {
+        objectId: 4926,
+        targetObjectId: 5046
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      ok: true,
       results: [
         {
           objectId: 5046,
