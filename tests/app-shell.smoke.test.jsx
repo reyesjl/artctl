@@ -2238,6 +2238,42 @@ test("homepage shows a dismissible task notice below the gallery", async () => {
   expect(screen.queryByLabelText("Task notice")).not.toBeInTheDocument();
 });
 
+test("homepage shows a dismissible print-support notice above the gallery", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          }
+        ]
+      };
+    }
+  };
+
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const supportNotice = await screen.findByLabelText("Print support notice");
+  const supportLink = screen.getByRole("link", { name: "[Where your money goes]" });
+
+  expect(supportNotice).toHaveClass("border");
+  expect(supportNotice).toHaveClass("border-border");
+  expect(screen.getByText("ARTCTL is supported in part through print purchases.")).toBeInTheDocument();
+  expect(
+    screen.getByText(
+      "Funds contribute to hosting, artwork study systems, and maintaining long-term public access to the collection."
+    )
+  ).toBeInTheDocument();
+  expect(supportLink).toHaveAttribute("href", "/help#buying-prints");
+
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss print support notice" }));
+
+  expect(screen.queryByLabelText("Print support notice")).not.toBeInTheDocument();
+});
+
 test("homepage shows a friendly message when Express cannot load the Met gallery", async () => {
   const metClient = {
     async getGalleryPage() {
@@ -3863,6 +3899,23 @@ test("help route renders a clickable section index with hash links", async () =>
   expect(printsLink).toHaveAttribute("href", "#buying-prints");
   expect(sourceLink).toHaveAttribute("href", "#collection-source");
   expect(aboutLink).toHaveAttribute("href", "#about-me");
+});
+
+test("help route scrolls to the requested hash section on load", async () => {
+  const scrollIntoView = vi.fn();
+
+  window.history.pushState({}, "", "/help#buying-prints");
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView
+  });
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  await screen.findByRole("heading", { name: "Help" });
+
+  expect(scrollIntoView).toHaveBeenCalled();
+  expect(screen.getByRole("link", { name: "[buying prints]" })).toHaveAttribute("aria-current", "location");
 });
 
 test("help route renders the manual copy on the shared background", async () => {

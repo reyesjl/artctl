@@ -47,6 +47,7 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [emptyState, setEmptyState] = useState(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("loading");
+  const [isPrintSupportNoticeVisible, setIsPrintSupportNoticeVisible] = useState(true);
   const [isTaskNoticeVisible, setIsTaskNoticeVisible] = useState(true);
   const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
   const [suggestionArtist, setSuggestionArtist] = useState("");
@@ -172,6 +173,37 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
           </button>
         </div>
       </section>
+      {isPrintSupportNoticeVisible ? (
+        <section
+          aria-label="Print support notice"
+          className="mt-4 grid gap-2 border border-border bg-card p-3 text-sm text-foreground"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="grid gap-1">
+              <p className="m-0">ARTCTL is supported in part through print purchases.</p>
+              <p className="m-0 text-muted-foreground">
+                Funds contribute to hosting, artwork study systems, and maintaining long-term public
+                access to the collection.
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss print support notice"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+              onClick={() => {
+                setIsPrintSupportNoticeVisible(false);
+              }}
+            >
+              [x]
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link to="/help#buying-prints" className="text-xs text-primary">
+              [Where your money goes]
+            </Link>
+          </div>
+        </section>
+      ) : null}
       {isSuggestionModalOpen ? (
         <>
           <button

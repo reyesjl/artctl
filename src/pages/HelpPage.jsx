@@ -66,6 +66,19 @@ function getActiveSectionFromHash() {
     : HELP_SECTIONS[0].id;
 }
 
+function scrollToHashSection() {
+  if (typeof window === "undefined" || !window.location.hash) {
+    return;
+  }
+
+  const sectionId = window.location.hash.slice(1);
+  const targetSection = document.getElementById(sectionId);
+
+  if (targetSection && typeof targetSection.scrollIntoView === "function") {
+    targetSection.scrollIntoView();
+  }
+}
+
 function HelpSection({ id, title, children }) {
   return (
     <section id={id} className="space-y-2 scroll-mt-6">
@@ -112,6 +125,7 @@ export function HelpPage() {
   useEffect(() => {
     const handleHashChange = () => {
       setActiveSection(getActiveSectionFromHash());
+      scrollToHashSection();
     };
 
     handleHashChange();
