@@ -17,6 +17,14 @@ export function AdminPage() {
           </p>
         </li>
         <li className="grid gap-1">
+          <Link to="/admin/study-notes" className="text-action">
+            [study notes]
+          </Link>
+          <p className="text-sm text-muted-foreground">
+            Inspect and manage persisted study notes.
+          </p>
+        </li>
+        <li className="grid gap-1">
           <Link to="/admin/suggestions" className="text-action">
             [artwork suggestions]
           </Link>

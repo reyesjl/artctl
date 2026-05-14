@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AdminPage } from "./pages/AdminPage.jsx";
+import { AdminStudyNotesPage } from "./pages/AdminStudyNotesPage.jsx";
 import { AdminGalleryPage } from "./pages/AdminGalleryPage.jsx";
 import { AdminSuggestionsPage } from "./pages/AdminSuggestionsPage.jsx";
 import { CreateCuratedGroupPage } from "./pages/CreateCuratedGroupPage.jsx";
@@ -297,7 +298,13 @@ function AppShell({
         />
         <Route
           path="/works/:objectId"
-          element={<WorkPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+          element={
+            <WorkPage
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              isAdminAuthenticated={adminSession.authenticated}
+            />
+          }
         />
         <Route
           path="/admin"
@@ -309,6 +316,19 @@ function AppShell({
               isAdminAuthenticated={adminSession.authenticated}
             >
               <AdminPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/study-notes"
+          element={
+            <AdminRoute
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              onAuthenticated={onAdminAuthenticated}
+              isAdminAuthenticated={adminSession.authenticated}
+            >
+              <AdminStudyNotesPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />
             </AdminRoute>
           }
         />
@@ -368,7 +388,7 @@ function AppShell({
         <Route path="/theme" element={<ThemesPage />} />
       </Routes>
       <footer className="app-footer-strip bg-background px-4 py-3 text-center text-[10px] text-muted-foreground">
-        ARTCTL v1.5
+        ARTCTL v1.6
       </footer>
     </div>
   );

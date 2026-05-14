@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Info, Receipt, Share2 } from "lucide-react";
+import { Info, MessageSquareWarning, Receipt, Share2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { BrailleNoiseStream } from "../components/BrailleNoiseStream.jsx";
 import { RouteFrame } from "../components/RouteFrame.jsx";
@@ -52,6 +52,12 @@ function normalizeStudyNote(data) {
   };
 }
 
+function readStudyResponse(data) {
+  const note = data && typeof data === "object" && data.note ? data.note : data;
+
+  return normalizeStudyNote(note);
+}
+
 function getStudyFields(note) {
   return [
     { label: "observe", value: note.observe },
@@ -97,7 +103,7 @@ function getTouchDistance(touches) {
   return Math.hypot(secondTouch.clientX - firstTouch.clientX, secondTouch.clientY - firstTouch.clientY);
 }
 
-export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
+export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthenticated = false }) {
   const { objectId } = useParams();
   const isMobileLayout = useIsMobileLayout();
   const [work, setWork] = useState(null);
@@ -110,8 +116,9 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   });
   const [aiInfoError, setAiInfoError] = useState("");
   const [aiInfoStatus, setAiInfoStatus] = useState("idle");
+  const [aiRefreshStatus, setAiRefreshStatus] = useState("idle");
+  const [aiRefreshError, setAiRefreshError] = useState("");
   const [isStudyOverlayVisible, setIsStudyOverlayVisible] = useState(false);
-  const [isStudyOverlayExpanded, setIsStudyOverlayExpanded] = useState(true);
   const [isOpenAccessInfoVisible, setIsOpenAccessInfoVisible] = useState(false);
   const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
   const [isMobileDetailsExpanded, setIsMobileDetailsExpanded] = useState(false);
@@ -168,8 +175,9 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     });
     setAiInfoError("");
     setAiInfoStatus("idle");
+    setAiRefreshStatus("idle");
+    setAiRefreshError("");
     setIsStudyOverlayVisible(false);
-    setIsStudyOverlayExpanded(true);
     setIsOpenAccessInfoVisible(false);
     setIsPrintModalVisible(false);
     setIsMobileDetailsExpanded(false);
@@ -218,6 +226,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
     const figureElement = figureRef.current;
     const handleWheel = (event) => {
+      if (event.target instanceof Element && event.target.closest("[data-study-overlay-scroll]")) {
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
 
@@ -473,7 +485,6 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
     setAiInfoStatus("loading");
     setIsStudyOverlayVisible(true);
-    setIsStudyOverlayExpanded(true);
     setAiInfoError("");
 
     try {
@@ -494,7 +505,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
         return;
       }
 
-      setAiNote(normalizeStudyNote(data));
+      setAiNote(readStudyResponse(data));
       setAiInfoStatus("idle");
     } catch (requestError) {
       setAiNote({
@@ -507,6 +518,37 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
         requestError instanceof Error ? requestError.message : "Unable to load AI artwork info."
       );
       setAiInfoStatus("idle");
+    }
+  }
+
+  async function handleRefreshAiInfo() {
+    if (!isAdminAuthenticated || aiRefreshStatus === "loading") {
+      return;
+    }
+
+    setAiRefreshStatus("loading");
+    setAiRefreshError("");
+
+    try {
+      const response = await fetchImpl(`${apiBaseUrl}/api/admin/works/${objectId}/ai-info/refresh`, {
+        method: "POST"
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        setAiRefreshError(data.error || "Unable to refresh AI artwork info.");
+        setAiRefreshStatus("idle");
+        return;
+      }
+
+      setAiNote(readStudyResponse(data));
+      setAiInfoError("");
+      setAiRefreshStatus("idle");
+    } catch (requestError) {
+      setAiRefreshError(
+        requestError instanceof Error ? requestError.message : "Unable to refresh AI artwork info."
+      );
+      setAiRefreshStatus("idle");
     }
   }
 
@@ -558,40 +600,38 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     : "default";
   const imageTransition = !isMobileLayout && dragStateRef.current ? "none" : "transform 150ms ease";
   const studyFields = getStudyFields(aiNote);
+  const hasStudyNote = studyFields.length > 0;
   const showExpandedMetadata = !isMobileLayout || isMobileDetailsExpanded;
   const studyContent = (
     <>
-      <div className="flex items-center justify-end gap-2 text-xs">
-        <span className="mr-auto text-[10px] text-muted-foreground">
-          Machine observation is not connoisseurship.
-        </span>
-        {studyFields.length > 0 && aiInfoStatus !== "loading" ? (
-          <button
-            type="button"
-            className="text-action"
-            aria-label={isStudyOverlayExpanded ? "Collapse study overlay" : "Expand study overlay"}
-            onClick={() => setIsStudyOverlayExpanded((current) => !current)}
-          >
-            {isStudyOverlayExpanded ? "[collapse]" : "[expand]"}
-          </button>
-        ) : null}
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-background/95 px-3 py-2 text-xs backdrop-blur-sm">
+        <div className="inline-flex flex-col items-start gap-1 text-[10px] text-muted-foreground sm:flex-row sm:items-center sm:gap-2">
+          <span className="inline-flex items-center gap-2">
+            <MessageSquareWarning className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>Machine observation is not connoisseurship.</span>
+          </span>
+          <a href="/help#study-works" className="text-action text-[9px]">
+            [learn more]
+          </a>
+        </div>
         <button
           type="button"
           className="text-action"
           aria-label={isMobileLayout ? "Close study sheet" : "Close study overlay"}
           onClick={() => setIsStudyOverlayVisible(false)}
         >
-          [close]
+          [x]
         </button>
       </div>
-      {aiInfoStatus === "loading" ? <BrailleNoiseStream /> : null}
-      {aiInfoError ? (
-        <p role="alert" className="m-0 mt-2 text-sm text-destructive">
-          {aiInfoError}
-        </p>
-      ) : null}
-      {studyFields.length > 0 && isStudyOverlayExpanded ? (
-        <div className="mt-2 grid gap-4">
+      <div className="px-3 pb-3 pt-3">
+        {aiInfoStatus === "loading" ? <BrailleNoiseStream /> : null}
+        {aiInfoError ? (
+          <p role="alert" className="m-0 text-sm text-destructive">
+            {aiInfoError}
+          </p>
+        ) : null}
+        {studyFields.length > 0 ? (
+          <div className="grid gap-4">
           {studyFields.map((field) => (
             <section key={field.label} className="grid gap-1">
               <p className="m-0 text-[10px] tracking-[0.12em] text-muted-foreground">
@@ -616,14 +656,15 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
               ) : null}
             </section>
           ))}
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </div>
     </>
   );
   const desktopZoomLabel = isDesktopViewerHovered ? "[scroll zoom]" : "zoom";
   const desktopViewerControls = (
     <div
-      className="flex flex-wrap items-center gap-2 rounded-sm border border-border bg-background/45 px-3 py-2 text-xs text-foreground/80 shadow-sm transition-colors hover:bg-background/60 hover:text-foreground focus-within:bg-background/60 focus-within:text-foreground"
+      className="flex w-full flex-wrap items-center gap-2 border border-border border-l-0 border-r-0 border-t-0 bg-background/45 px-3 py-2 text-xs text-foreground/80 shadow-sm transition-colors hover:bg-background/60 hover:text-foreground focus-within:bg-background/60 focus-within:text-foreground"
       aria-label="Artwork inspection controls"
     >
       <span>{desktopZoomLabel}</span>
@@ -776,7 +817,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
               {work.imageUrl ? (
                 <>
                   {!isMobileLayout ? (
-                    <figcaption className="absolute left-3 top-3 z-10">
+                    <figcaption className="absolute inset-x-0 top-0 z-10">
                       {desktopViewerControls}
                     </figcaption>
                   ) : null}
@@ -807,7 +848,8 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                   </div>
                   {isStudyOverlayVisible && !isMobileLayout ? (
                     <section
-                      className="absolute inset-x-3 bottom-3 z-10 max-h-[55%] overflow-y-auto border border-border bg-background/90 p-3 text-sm shadow-sm backdrop-blur-sm"
+                      data-study-overlay-scroll
+                      className="absolute inset-x-0 bottom-0 z-10 max-h-[55%] overflow-y-auto border border-border border-b-0 border-l-0 border-r-0 bg-background/90 p-0 text-sm shadow-sm backdrop-blur-sm"
                       aria-label="Study overlay"
                     >
                       {studyContent}
@@ -924,6 +966,37 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                       <Receipt className="h-4 w-4" aria-hidden="true" />
                     </button>
                   ) : null}
+                  {isAdminAuthenticated && hasStudyNote ? (
+                    <div className="grid gap-1">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-xs text-primary"
+                        aria-label={
+                          aiRefreshStatus === "loading"
+                            ? "Refreshing study note"
+                            : "Refresh study note"
+                        }
+                        disabled={aiRefreshStatus === "loading"}
+                        onClick={handleRefreshAiInfo}
+                      >
+                        <span>
+                          {aiRefreshStatus === "loading"
+                            ? "[refreshing study note]"
+                            : "[refresh study note]"}
+                        </span>
+                      </button>
+                      {aiRefreshStatus === "loading" ? (
+                        <p className="m-0 text-xs text-muted-foreground">
+                          Refreshing study note...
+                        </p>
+                      ) : null}
+                      {aiRefreshError ? (
+                        <p role="alert" className="m-0 text-xs text-destructive">
+                          {aiRefreshError}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </>
               ) : null}
             </section>
@@ -944,10 +1017,35 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             role="dialog"
             aria-modal="true"
             aria-label="Buy a Print"
-            className="fixed inset-x-3 top-20 z-50 mx-auto w-full max-w-md border border-border bg-card px-4 py-4 text-sm text-card-foreground shadow-2xl"
+            className="fixed inset-x-3 top-20 z-50 mx-auto max-w-md border border-border bg-card px-4 py-4 text-sm text-card-foreground shadow-2xl"
           >
             <div className="grid gap-3">
               <p className="m-0">The ability to purchase prints from here is coming soon!</p>
+              <p className="m-0 text-xs text-muted-foreground">
+                When print purchasing is enabled, that money helps cover the ongoing costs of
+                running ARTCTL.
+              </p>
+              <div className="grid gap-1.5 text-xs text-muted-foreground">
+                <p className="m-0">
+                  <span className="text-foreground">[server costs]</span> A portion goes toward
+                  hosting and keeping the site online.
+                </p>
+                <p className="m-0">
+                  <span className="text-foreground">["study it"]</span> A portion goes toward LLM
+                  calls that power &quot;Study it&quot; so visitors can learn more from art.
+                </p>
+                <p className="m-0">
+                  <span className="text-foreground">[print service]</span> A portion goes to the
+                  actual print service for printing and shipping your order.
+                </p>
+                <p className="m-0">
+                  <span className="text-foreground">[maintenance]</span> The rest supports the
+                  software team maintaining ARTCTL over its lifetime.
+                </p>
+              </div>
+              <p className="m-0 text-xs text-muted-foreground">
+                Purchasing a print goes a long way toward supporting the project.
+              </p>
               <div>
                 <button
                   type="button"
@@ -977,7 +1075,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             role="dialog"
             aria-modal="true"
             aria-label="Open Access and Public Domain"
-            className="fixed inset-x-3 top-20 z-50 mx-auto w-full max-w-md border border-border bg-card px-4 py-4 text-sm text-card-foreground shadow-2xl"
+            className="fixed inset-x-3 top-20 z-50 mx-auto max-w-md border border-border bg-card px-4 py-4 text-sm text-card-foreground shadow-2xl"
           >
             <div className="grid gap-3">
               <p className="m-0">
@@ -1013,7 +1111,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             role="dialog"
             aria-modal="true"
             aria-label="Study sheet"
-            className="fixed inset-x-0 bottom-0 z-50 max-h-[50vh] overflow-y-auto border-t border-border bg-background p-4 text-sm shadow-2xl"
+            className="fixed inset-x-0 bottom-0 z-50 max-h-[50vh] overflow-y-auto border-t border-border bg-background p-0 text-sm shadow-2xl"
             onTouchStart={handleStudySheetTouchStart}
             onTouchMove={handleStudySheetTouchMove}
             onTouchEnd={handleStudySheetTouchEnd}

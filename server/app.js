@@ -13,6 +13,8 @@ import {
 } from "./catalog-sqlite.js";
 import { loadCuratedArtistIndex } from "./curated-gallery.js";
 import { curatedGalleryRecords } from "./curated-gallery-records.js";
+import { createStudyNoteService } from "./study-note-service.js";
+import { listStudyNotes } from "./study-notes-sqlite.js";
 
 const defaultSpaHtmlPath = path.resolve(process.cwd(), "index.html");
 
@@ -185,6 +187,12 @@ export function createArtctlApp(options = {}) {
     return metClient.getWork(objectId);
   }
 
+  const studyNoteService = createStudyNoteService({
+    databasePath: catalogDatabasePath,
+    loadWorkByObjectId,
+    workInfoGenerator
+  });
+
   app.get("/api/app-shell", (_request, response) => {
     response.json({
       brand: "ARTCTL",
@@ -286,6 +294,61 @@ export function createArtctlApp(options = {}) {
   });
 
   app.use("/api/admin", requireAdminAuth);
+
+  app.post("/api/admin/works/:objectId/ai-info/refresh", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const objectId = Number.parseInt(request.params.objectId, 10);
+
+    if (Number.isNaN(objectId)) {
+      response.status(400).json({
+        error: "Object ID must be a number."
+      });
+      return;
+    }
+
+    if (!workInfoGenerator?.explainWorkForArtStudent) {
+      response.status(501).json({
+        error: "AI artwork info is not configured."
+      });
+      return;
+    }
+
+    try {
+      const studyNote = await studyNoteService?.getStudyNote({
+        objectId,
+        forceRefresh: true
+      });
+
+      if (!studyNote) {
+        response.status(404).json({
+          error: "Work not found."
+        });
+        return;
+      }
+
+      response.json(studyNote);
+    } catch (error) {
+      response.status(502).json({
+        error: error instanceof Error ? error.message : "Unable to refresh artwork explanation."
+      });
+    }
+  });
+
+  app.get("/api/admin/study-notes", (_request, response) => {
+    if (!catalogDatabasePath) {
+      response.json({
+        results: []
+      });
+      return;
+    }
+
+    response.json({
+      results: listStudyNotes(catalogDatabasePath)
+    });
+  });
 
   app.get("/api/admin/suggestions", (_request, response) => {
     response.json({
@@ -864,17 +927,16 @@ export function createArtctlApp(options = {}) {
     }
 
     try {
-      const work = await loadWorkByObjectId(objectId);
+      const studyNote = await studyNoteService?.getStudyNote({ objectId });
 
-      if (!work) {
+      if (!studyNote) {
         response.status(404).json({
           error: "Work not found."
         });
         return;
       }
 
-      const summary = await workInfoGenerator.explainWorkForArtStudent(work);
-      response.json(summary);
+      response.json(studyNote);
     } catch (error) {
       response.status(502).json({
         error: error instanceof Error ? error.message : "Unable to generate artwork explanation."

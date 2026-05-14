@@ -168,23 +168,44 @@ async function seedAdminGallery(fetchImpl, objectIds) {
 }
 
 const fetchImpl = createFetchImpl();
-const storage = new Map();
+const localStorageState = new Map();
+const sessionStorageState = new Map();
 
 function installLocalStorage() {
   Object.defineProperty(window, "localStorage", {
     configurable: true,
     value: {
       getItem(key) {
-        return storage.has(key) ? storage.get(key) : null;
+        return localStorageState.has(key) ? localStorageState.get(key) : null;
       },
       setItem(key, value) {
-        storage.set(key, String(value));
+        localStorageState.set(key, String(value));
       },
       removeItem(key) {
-        storage.delete(key);
+        localStorageState.delete(key);
       },
       clear() {
-        storage.clear();
+        localStorageState.clear();
+      }
+    }
+  });
+}
+
+function installSessionStorage() {
+  Object.defineProperty(window, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem(key) {
+        return sessionStorageState.has(key) ? sessionStorageState.get(key) : null;
+      },
+      setItem(key, value) {
+        sessionStorageState.set(key, String(value));
+      },
+      removeItem(key) {
+        sessionStorageState.delete(key);
+      },
+      clear() {
+        sessionStorageState.clear();
       }
     }
   });
@@ -264,7 +285,9 @@ function dispatchTouchEvent(target, type, touches, changedTouches = touches) {
 beforeEach(() => {
   cleanup();
   installLocalStorage();
+  installSessionStorage();
   window.localStorage.clear();
+  window.sessionStorage.clear();
   setViewportWidth(1024);
   window.history.pushState({}, "", "/");
 });
@@ -282,7 +305,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("ARTCTL v1.5").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.6").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -385,6 +408,7 @@ test("work route uses the wider route frame", async () => {
 test.each([
   { route: "/works/42", heading: "Work 42" },
   { route: "/admin", heading: "Admin" },
+  { route: "/admin/study-notes", heading: "Study Notes" },
   { route: "/admin/curated-groups", heading: "Curated Groups" },
   { route: "/admin/curated-groups/new", heading: "Create Curated Group" },
   { route: "/admin/curated-groups/homepage", heading: "Homepage Gallery" },
@@ -1001,6 +1025,32 @@ test("admin landing route lets me choose curated groups management", async () =>
   expect(requests).toEqual(["/api/app-shell", "/api/admin/session", "/api/admin/session"]);
 });
 
+test("admin landing route lets me choose study notes management", async () => {
+  const requests = [];
+
+  window.history.pushState({}, "", "/admin");
+
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
+
+  expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
+  const studyNotesLink = screen.getByRole("link", { name: "[study notes]" });
+
+  expect(studyNotesLink).toHaveAttribute("href", "/admin/study-notes");
+  expect(studyNotesLink).toHaveTextContent("[study notes]");
+  expect(screen.getByText("Inspect and manage persisted study notes.")).toBeInTheDocument();
+
+  fireEvent.click(studyNotesLink);
+
+  expect(await screen.findByRole("heading", { name: "Study Notes" })).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/admin/study-notes");
+  expect(requests).toEqual([
+    "/api/app-shell",
+    "/api/admin/session",
+    "/api/admin/session",
+    "/api/admin/study-notes"
+  ]);
+});
+
 test("admin gallery route can add a local object id into the curated gallery list", async () => {
   const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-sqlite-"));
   const databasePath = path.join(tempDir, "catalog.sqlite");
@@ -1462,7 +1512,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("ARTCTL v1.5")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.6")).toBeInTheDocument();
 });
 
 test("search route reveals terminal-style department and media pickers from the action strip", async () => {
@@ -2205,6 +2255,110 @@ test("admin suggestions route can list and delete submitted artwork suggestions"
   expect(requests).toContain("DELETE /api/admin/suggestions/1");
 });
 
+test("admin study notes route lists persisted study notes", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-study-notes-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  const fetchImpl = createFetchImpl({
+    catalogDatabasePath: databasePath,
+    workInfoGenerator: {
+      model: "gpt-test",
+      promptVersion: "art-study-note-v1",
+      async explainWorkForArtStudent() {
+        return {
+          observe: "Notice the slant of the wrecked mast.",
+          context: "The medal marks a naval disaster remembered through commemorative design.",
+          technique: "The relief surface uses tight contours to keep the imagery legible at small scale.",
+          sources: [
+            {
+              url: "https://www.metmuseum.org/art/collection/search/5046",
+              title: 'The "Shipwreck Medal" | The Met'
+            }
+          ]
+        };
+      }
+    }
+  });
+
+  await fetchImpl("http://artctl.test/api/works/5046/ai-info", {
+    method: "POST"
+  });
+
+  window.history.pushState({}, "", "/admin/study-notes");
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByRole("heading", { name: "Study Notes" })).toBeInTheDocument();
+  expect(await screen.findByText('The "Shipwreck Medal"')).toBeInTheDocument();
+  expect(screen.getByText("Salathiel Ellis")).toBeInTheDocument();
+  expect(screen.getByText("gpt-test")).toBeInTheDocument();
+  expect(screen.getByText("art-study-note-v1")).toBeInTheDocument();
+  expect(screen.getByText("Notice the slant of the wrecked mast.")).toBeInTheDocument();
+});
+
+test("admin study notes route can refresh a persisted study note", async () => {
+  const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-app-shell-study-notes-refresh-"));
+  const databasePath = path.join(tempDir, "catalog.sqlite");
+  const requests = [];
+  let generationNumber = 0;
+
+  expect(
+    runCatalogImport({
+      csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+      databasePath
+    }).ok
+  ).toBe(true);
+
+  const fetchImpl = createFetchImpl({
+    requestLog: requests,
+    catalogDatabasePath: databasePath,
+    workInfoGenerator: {
+      model: "gpt-test",
+      promptVersion: "art-study-note-v1",
+      async explainWorkForArtStudent() {
+        generationNumber += 1;
+
+        if (generationNumber === 1) {
+          return {
+            observe: "observe-1",
+            context: "context-1",
+            technique: "technique-1",
+            sources: []
+          };
+        }
+
+        return {
+          observe: "observe-2",
+          context: "context-2",
+          technique: "technique-2",
+          sources: []
+        };
+      }
+    }
+  });
+
+  await fetchImpl("http://artctl.test/api/works/5046/ai-info", {
+    method: "POST"
+  });
+
+  window.history.pushState({}, "", "/admin/study-notes");
+  render(<App fetchImpl={fetchImpl} />);
+
+  expect(await screen.findByText("observe-1")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: 'Refresh study note for The "Shipwreck Medal"' }));
+
+  expect(await screen.findByText("observe-2")).toBeInTheDocument();
+  expect(screen.queryByText("observe-1")).not.toBeInTheDocument();
+  expect(requests).toContain("POST /api/admin/works/5046/ai-info/refresh");
+});
+
 test("homepage shows a dismissible task notice below the gallery", async () => {
   const metClient = {
     async getGalleryPage() {
@@ -2271,6 +2425,40 @@ test("homepage shows a dismissible print-support notice above the gallery", asyn
 
   fireEvent.click(screen.getByRole("button", { name: "Dismiss print support notice" }));
 
+  expect(screen.queryByLabelText("Print support notice")).not.toBeInTheDocument();
+});
+
+test("homepage keeps the print-support notice hidden for the current browser session", async () => {
+  const metClient = {
+    async getGalleryPage() {
+      return {
+        results: [
+          {
+            objectId: 436121,
+            title: "The Great Wave off Kanagawa",
+            artist: "Japanese",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg"
+          }
+        ]
+      };
+    }
+  };
+
+  const sessionFetch = createFetchImpl({ metClient });
+
+  render(<App fetchImpl={sessionFetch} />);
+
+  expect(await screen.findByLabelText("Print support notice")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss print support notice" }));
+
+  expect(screen.queryByLabelText("Print support notice")).not.toBeInTheDocument();
+  expect(window.sessionStorage.getItem("artctl-print-support-notice-dismissed")).toBe("true");
+
+  cleanup();
+  render(<App fetchImpl={sessionFetch} />);
+
+  await screen.findByText("ARTCTL", { selector: ".brand" });
   expect(screen.queryByLabelText("Print support notice")).not.toBeInTheDocument();
 });
 
@@ -2941,6 +3129,13 @@ test("work viewer can request and render ai info for an art student", async () =
   expect(studyOverlay).toHaveClass("border-border");
   expect(studyOverlay).toHaveClass("overflow-y-auto");
   expect(studyOverlay).toHaveClass("max-h-[55%]");
+  const overlayHeader = screen.getByText("Machine observation is not connoisseurship.").parentElement;
+  const learnMoreLink = screen.getByRole("link", { name: "[learn more]" });
+
+  expect(overlayHeader).toHaveClass("sticky");
+  expect(overlayHeader).toHaveClass("top-0");
+  expect(overlayHeader).toHaveClass("border-b");
+  expect(learnMoreLink).toHaveAttribute("href", "/help#study-works");
   expect(screen.queryByText("study")).not.toBeInTheDocument();
   expect(screen.queryByText("look")).not.toBeInTheDocument();
   expect(screen.getByText("observe")).toBeInTheDocument();
@@ -2977,6 +3172,7 @@ test("work viewer can request and render ai info for an art student", async () =
     "https://www.britannica.com/topic/The-Great-Wave-off-Kanagawa"
   );
   expect(screen.getByRole("button", { name: "Close study overlay" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Close study overlay" })).toHaveTextContent("[x]");
 
   fireEvent.click(screen.getByRole("button", { name: "Close study overlay" }));
 
@@ -3042,6 +3238,131 @@ test("study it does not start a second generation while a note already exists on
   expect(
     requests.filter((request) => request === "POST /api/works/436121/ai-info")
   ).toHaveLength(1);
+});
+
+test("admin can refresh a study note from the metadata panel without hiding the current note", async () => {
+  const requests = [];
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Katsushika Hokusai",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  let resolveRefresh;
+  let generationNumber = 0;
+  const workInfoGenerator = {
+    async explainWorkForArtStudent() {
+      generationNumber += 1;
+
+      if (generationNumber === 1) {
+        return {
+          observe: "observe-1",
+          context: "context-1",
+          technique: "technique-1",
+          sources: []
+        };
+      }
+
+      return new Promise((resolve) => {
+        resolveRefresh = () =>
+          resolve({
+            observe: "observe-2",
+            context: "context-2",
+            technique: "technique-2",
+            sources: []
+          });
+      });
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        requestLog: requests,
+        metClient,
+        workInfoGenerator,
+        autoAuthenticateAdmin: true
+      })}
+    />
+  );
+
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+  expect(await screen.findByText("observe-1")).toBeInTheDocument();
+
+  const refreshButton = await screen.findByRole("button", { name: "Refresh study note" });
+  fireEvent.click(refreshButton);
+
+  expect(await screen.findByText("observe-1")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Refreshing study note" })).toBeDisabled();
+  expect(screen.getByText("Refreshing study note...")).toBeInTheDocument();
+
+  resolveRefresh();
+
+  expect(await screen.findByText("observe-2")).toBeInTheDocument();
+  expect(screen.queryByText("observe-1")).not.toBeInTheDocument();
+  expect(requests).toContain("POST /api/admin/works/436121/ai-info/refresh");
+});
+
+test("admin refresh failure keeps the existing study note visible", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Katsushika Hokusai",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  let generationNumber = 0;
+  const workInfoGenerator = {
+    async explainWorkForArtStudent() {
+      generationNumber += 1;
+
+      if (generationNumber === 1) {
+        return {
+          observe: "observe-1",
+          context: "context-1",
+          technique: "technique-1",
+          sources: []
+        };
+      }
+
+      throw new Error("refresh failed");
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        metClient,
+        workInfoGenerator,
+        autoAuthenticateAdmin: true
+      })}
+    />
+  );
+
+  await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+  expect(await screen.findByText("observe-1")).toBeInTheDocument();
+
+  fireEvent.click(await screen.findByRole("button", { name: "Refresh study note" }));
+
+  expect(await screen.findByText("observe-1")).toBeInTheDocument();
+  expect(await screen.findByRole("alert")).toHaveTextContent("refresh failed");
 });
 
 test("mobile work viewer opens study content in a separate bottom sheet", async () => {
@@ -3446,6 +3767,48 @@ test("desktop work viewer prevents page scrolling while wheel zooming the artwor
   expect(wheelEvent.defaultPrevented).toBe(true);
 });
 
+test("desktop study overlay keeps wheel scrolling instead of zooming the artwork", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  const workInfoGenerator = {
+    async explainWorkForArtStudent() {
+      return {
+        observe: "observe-1",
+        context: "context-1",
+        technique: "technique-1",
+        sources: []
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/works/436121");
+  render(<App fetchImpl={createFetchImpl({ metClient, workInfoGenerator })} />);
+
+  const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+  fireEvent.click(screen.getByRole("button", { name: "Study it" }));
+
+  const overlay = await screen.findByLabelText("Study overlay");
+  const wheelEvent = new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -100 });
+
+  fireEvent(overlay, wheelEvent);
+
+  expect(wheelEvent.defaultPrevented).toBe(false);
+  expect(image).toHaveStyle({
+    transform: "translate(0px, 0px) scale(1)"
+  });
+});
+
 test("reset view stays enabled for non-original analysis modes even at the default zoom level", async () => {
   const metClient = {
     async getWork(objectId) {
@@ -3746,6 +4109,16 @@ test("work viewer opens a coming-soon modal for print purchases", async () => {
   expect(await screen.findByRole("dialog", { name: "Buy a Print" })).toBeInTheDocument();
   expect(
     screen.getByText("The ability to purchase prints from here is coming soon!")
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("When print purchasing is enabled, that money helps cover the ongoing costs of running ARTCTL.")
+  ).toBeInTheDocument();
+  expect(screen.getByText("[server costs]")).toBeInTheDocument();
+  expect(screen.getByText('["study it"]')).toBeInTheDocument();
+  expect(screen.getByText("[print service]")).toBeInTheDocument();
+  expect(screen.getByText("[maintenance]")).toBeInTheDocument();
+  expect(
+    screen.getByText("Purchasing a print goes a long way toward supporting the project.")
   ).toBeInTheDocument();
 });
 
@@ -4080,7 +4453,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("ARTCTL v1.5")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.6")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 

@@ -1,5 +1,6 @@
 const defaultApiBaseUrl = "https://api.openai.com/v1";
 const defaultModel = "gpt-5.2";
+export const defaultPromptVersion = "art-study-note-v1";
 
 function trimOrFallback(value, fallback = "") {
   const normalizedValue = String(value ?? "").trim();
@@ -130,6 +131,8 @@ export function createWorkInfoGenerator({
   }
 
   return {
+    model,
+    promptVersion: defaultPromptVersion,
     async explainWorkForArtStudent(work) {
       const response = await fetchImpl(`${apiBaseUrl}/responses`, {
         method: "POST",

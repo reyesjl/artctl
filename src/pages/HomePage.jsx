@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { RouteFrame } from "../components/RouteFrame.jsx";
 import { shareCurrentPage } from "../lib/share.js";
 
+const printSupportNoticeSessionStorageKey = "artctl-print-support-notice-dismissed";
+
 function isArtistSummary(item) {
   return typeof item?.artistSlug === "string";
 }
@@ -55,6 +57,16 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [suggestionCreditorName, setSuggestionCreditorName] = useState("");
   const [suggestionError, setSuggestionError] = useState("");
   const [suggestionStatus, setSuggestionStatus] = useState("idle");
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    setIsPrintSupportNoticeVisible(
+      window.sessionStorage.getItem(printSupportNoticeSessionStorageKey) !== "true"
+    );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +203,9 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
               aria-label="Dismiss print support notice"
               className="text-xs text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.sessionStorage.setItem(printSupportNoticeSessionStorageKey, "true");
+                }
                 setIsPrintSupportNoticeVisible(false);
               }}
             >
@@ -218,7 +233,7 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
             role="dialog"
             aria-modal="true"
             aria-label="Suggest Art Work"
-            className="fixed inset-x-3 top-20 z-50 mx-auto w-full max-w-md"
+            className="fixed inset-x-3 top-20 z-50 mx-auto max-w-md"
           >
             <form
               className="border border-border bg-card text-card-foreground px-3 py-3 space-y-2 text-sm font-mono"

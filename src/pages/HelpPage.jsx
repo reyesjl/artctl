@@ -204,8 +204,17 @@ export function HelpPage() {
 
           <HelpSection id="study-works" title="STUDY WORKS">
             <p className="text-xs text-muted-foreground">
-              Each artwork can be explored through structured viewing modes
-              designed to surface different layers of a piece.
+              ARTCTL combines machine observation, collection metadata, and
+              historical references to generate structured viewing notes for
+              each artwork.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Responses are synthesized from the artwork itself, museum catalog
+              information, and broader public discussion surrounding the piece.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              These notes are intended as viewing aids, not authoritative
+              scholarship.
             </p>
             <p className="text-xs text-muted-foreground">
               The <span className="text-foreground">[study it]</span> system

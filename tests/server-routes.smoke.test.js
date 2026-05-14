@@ -1351,7 +1351,11 @@ describe("work detail API", () => {
     });
   });
 
-  test("POST /api/works/:objectId/ai-info returns an art-student explanation for the work", async () => {
+  test("POST /api/works/:objectId/ai-info persists and reuses a generated study note", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-study-note-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const generatedNotes = [];
+    initializeCatalogSqlite(databasePath);
     const catalog = {
       isReady() {
         return true;
@@ -1372,6 +1376,7 @@ describe("work detail API", () => {
     };
     const workInfoGenerator = {
       async explainWorkForArtStudent(work) {
+        generatedNotes.push(work.objectId);
         expect(work).toEqual({
           objectId: 436121,
           title: "The Great Wave off Kanagawa",
@@ -1393,21 +1398,530 @@ describe("work detail API", () => {
         };
       }
     };
-    const detailApp = createArtctlApp({ catalog, workInfoGenerator });
+    const detailApp = createArtctlApp({ catalog, workInfoGenerator, catalogDatabasePath: databasePath });
 
-    const response = await makeRequest("/api/works/436121/ai-info", detailApp, {
+    const firstResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+    const secondResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
       method: "POST"
     });
 
-    expect(response.statusCode).toBe(200);
+    expect(firstResponse.statusCode).toBe(200);
+    expect(JSON.parse(firstResponse._getData())).toEqual({
+      note: {
+        observe:
+          "The wave dominates the boats through scale contrast and repeated curvature.",
+        context:
+          "Hokusai made the print in Edo-period Japan, when landscape prints circulated broadly.",
+        technique:
+          "Strong contour and flat color keep the composition legible while unifying the scene.",
+        sources: []
+      },
+      meta: {
+        cacheHit: false,
+        forcedRefresh: false,
+        coalesced: false
+      }
+    });
+    expect(secondResponse.statusCode).toBe(200);
+    expect(JSON.parse(secondResponse._getData())).toEqual({
+      note: {
+        observe:
+          "The wave dominates the boats through scale contrast and repeated curvature.",
+        context:
+          "Hokusai made the print in Edo-period Japan, when landscape prints circulated broadly.",
+        technique:
+          "Strong contour and flat color keep the composition legible while unifying the scene.",
+        sources: []
+      },
+      meta: {
+        cacheHit: true,
+        forcedRefresh: false,
+        coalesced: false
+      }
+    });
+    expect(generatedNotes).toEqual([436121]);
+  });
+
+  test("POST /api/admin/works/:objectId/ai-info/refresh overwrites the cached study note", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-study-note-admin-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    let generationNumber = 0;
+    initializeCatalogSqlite(databasePath);
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getWork(objectId) {
+        return {
+          objectId,
+          title: "The Great Wave off Kanagawa",
+          artist: "Katsushika Hokusai",
+          date: "ca. 1830-32",
+          context: "Print - Polychrome woodblock print; ink and color on paper",
+          imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+          metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+        };
+      }
+    };
+    const workInfoGenerator = {
+      model: "gpt-test",
+      promptVersion: "art-study-note-v1",
+      async explainWorkForArtStudent() {
+        generationNumber += 1;
+
+        return {
+          observe: `observe-${generationNumber}`,
+          context: `context-${generationNumber}`,
+          technique: `technique-${generationNumber}`,
+          sources: []
+        };
+      }
+    };
+    const detailApp = createArtctlApp({
+      catalog,
+      catalogDatabasePath: databasePath,
+      adminAuth: {
+        username: "admin",
+        password: "secret"
+      },
+      workInfoGenerator
+    });
+
+    const initialResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+    const refreshResponse = await makeAdminRequest(
+      "/api/admin/works/436121/ai-info/refresh",
+      detailApp,
+      {
+        method: "POST"
+      }
+    );
+    const cachedResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+
+    expect(initialResponse.statusCode).toBe(200);
+    expect(JSON.parse(initialResponse._getData())).toEqual({
+      note: {
+        observe: "observe-1",
+        context: "context-1",
+        technique: "technique-1",
+        sources: []
+      },
+      meta: {
+        cacheHit: false,
+        forcedRefresh: false,
+        coalesced: false
+      }
+    });
+    expect(refreshResponse.statusCode).toBe(200);
+    expect(JSON.parse(refreshResponse._getData())).toEqual({
+      note: {
+        observe: "observe-2",
+        context: "context-2",
+        technique: "technique-2",
+        sources: []
+      },
+      meta: {
+        cacheHit: false,
+        forcedRefresh: true,
+        coalesced: false
+      }
+    });
+    expect(cachedResponse.statusCode).toBe(200);
+    expect(JSON.parse(cachedResponse._getData())).toEqual({
+      note: {
+        observe: "observe-2",
+        context: "context-2",
+        technique: "technique-2",
+        sources: []
+      },
+      meta: {
+        cacheHit: true,
+        forcedRefresh: false,
+        coalesced: false
+      }
+    });
+  });
+
+  test("POST /api/admin/works/:objectId/ai-info/refresh rejects unauthenticated access", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-study-note-admin-auth-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    initializeCatalogSqlite(databasePath);
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      adminAuth: {
+        username: "admin",
+        password: "secret"
+      },
+      catalog: {
+        isReady() {
+          return true;
+        }
+      }
+    });
+
+    const response = await makeRequest("/api/admin/works/436121/ai-info/refresh", detailApp, {
+      method: "POST"
+    });
+
+    expect(response.statusCode).toBe(401);
     expect(JSON.parse(response._getData())).toEqual({
-      observe:
-        "The wave dominates the boats through scale contrast and repeated curvature.",
-      context:
-        "Hokusai made the print in Edo-period Japan, when landscape prints circulated broadly.",
-      technique:
-        "Strong contour and flat color keep the composition legible while unifying the scene.",
-      sources: []
+      error: "Admin authentication required."
+    });
+  });
+
+  test("POST /api/works/:objectId/ai-info coalesces concurrent cache misses", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-study-note-coalesce-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const generationCalls = [];
+    let resolveStudy;
+    initializeCatalogSqlite(databasePath);
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      catalog: {
+        isReady() {
+          return true;
+        },
+        async getWork(objectId) {
+          return {
+            objectId,
+            title: "The Great Wave off Kanagawa",
+            artist: "Katsushika Hokusai",
+            date: "ca. 1830-32",
+            context: "Print - Polychrome woodblock print; ink and color on paper",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+            metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+          };
+        }
+      },
+      workInfoGenerator: {
+        async explainWorkForArtStudent() {
+          generationCalls.push("generate");
+
+          return new Promise((resolve) => {
+            resolveStudy = () =>
+              resolve({
+                observe: "observe-1",
+                context: "context-1",
+                technique: "technique-1",
+                sources: []
+              });
+          });
+        }
+      }
+    });
+
+    const firstResponsePromise = makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+    const secondResponsePromise = makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    expect(generationCalls).toEqual(["generate"]);
+
+    resolveStudy();
+
+    const [firstResponse, secondResponse] = await Promise.all([
+      firstResponsePromise,
+      secondResponsePromise
+    ]);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(secondResponse.statusCode).toBe(200);
+    expect(generationCalls).toEqual(["generate"]);
+    expect(JSON.parse(firstResponse._getData()).note.observe).toBe("observe-1");
+    expect(JSON.parse(secondResponse._getData())).toEqual({
+      note: {
+        observe: "observe-1",
+        context: "context-1",
+        technique: "technique-1",
+        sources: []
+      },
+      meta: {
+        cacheHit: false,
+        forcedRefresh: false,
+        coalesced: true
+      }
+    });
+  });
+
+  test("admin refresh supersedes an in-flight public study-note generation", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-study-note-admin-wins-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    let firstResolve;
+    let secondResolve;
+    let generationNumber = 0;
+    initializeCatalogSqlite(databasePath);
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      adminAuth: {
+        username: "admin",
+        password: "secret"
+      },
+      catalog: {
+        isReady() {
+          return true;
+        },
+        async getWork(objectId) {
+          return {
+            objectId,
+            title: "The Great Wave off Kanagawa",
+            artist: "Katsushika Hokusai",
+            date: "ca. 1830-32",
+            context: "Print - Polychrome woodblock print; ink and color on paper",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+            metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+          };
+        }
+      },
+      workInfoGenerator: {
+        async explainWorkForArtStudent() {
+          generationNumber += 1;
+
+          if (generationNumber === 1) {
+            return new Promise((resolve) => {
+              firstResolve = () =>
+                resolve({
+                  observe: "observe-1",
+                  context: "context-1",
+                  technique: "technique-1",
+                  sources: []
+              });
+            });
+          }
+
+          if (generationNumber > 2) {
+            return {
+              observe: `observe-${generationNumber}`,
+              context: `context-${generationNumber}`,
+              technique: `technique-${generationNumber}`,
+              sources: []
+            };
+          }
+
+          return new Promise((resolve) => {
+            secondResolve = () => {
+              resolve({
+                observe: "observe-2",
+                context: "context-2",
+                technique: "technique-2",
+                sources: []
+              });
+            };
+          });
+        }
+      }
+    });
+
+    const publicResponsePromise = makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    const adminResponsePromise = makeAdminRequest(
+      "/api/admin/works/436121/ai-info/refresh",
+      detailApp,
+      {
+        method: "POST"
+      }
+    );
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+    firstResolve();
+    secondResolve();
+
+    const [publicResponse, adminResponse] = await Promise.all([
+      publicResponsePromise,
+      adminResponsePromise
+    ]);
+    const database = new DatabaseSync(databasePath);
+    const persistedRows = database
+      .prepare("SELECT object_id AS objectId, observe FROM study_notes")
+      .all();
+    database.close();
+    const cachedResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+
+    expect(persistedRows).toEqual([
+      {
+        objectId: 436121,
+        observe: "observe-2"
+      }
+    ]);
+    expect(JSON.parse(publicResponse._getData()).note.observe).toBe("observe-2");
+    expect(JSON.parse(adminResponse._getData())).toEqual({
+      note: {
+        observe: "observe-2",
+        context: "context-2",
+        technique: "technique-2",
+        sources: []
+      },
+      meta: {
+        cacheHit: false,
+        forcedRefresh: true,
+        coalesced: false
+      }
+    });
+    expect(JSON.parse(cachedResponse._getData()).note.observe).toBe("observe-2");
+  });
+
+  test("failed study-note generations are not persisted", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-study-note-failure-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    let generationNumber = 0;
+    initializeCatalogSqlite(databasePath);
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      catalog: {
+        isReady() {
+          return true;
+        },
+        async getWork(objectId) {
+          return {
+            objectId,
+            title: "The Great Wave off Kanagawa",
+            artist: "Katsushika Hokusai",
+            date: "ca. 1830-32",
+            context: "Print - Polychrome woodblock print; ink and color on paper",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+            metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+          };
+        }
+      },
+      workInfoGenerator: {
+        async explainWorkForArtStudent() {
+          generationNumber += 1;
+
+          if (generationNumber === 1) {
+            throw new Error("upstream failure");
+          }
+
+          return {
+            observe: "observe-2",
+            context: "context-2",
+            technique: "technique-2",
+            sources: []
+          };
+        }
+      }
+    });
+
+    const failedResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+    const recoveredResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+    const cachedResponse = await makeRequest("/api/works/436121/ai-info", detailApp, {
+      method: "POST"
+    });
+
+    expect(failedResponse.statusCode).toBe(502);
+    expect(JSON.parse(failedResponse._getData())).toEqual({
+      error: "upstream failure"
+    });
+    expect(recoveredResponse.statusCode).toBe(200);
+    expect(JSON.parse(recoveredResponse._getData()).note.observe).toBe("observe-2");
+    expect(JSON.parse(cachedResponse._getData())).toEqual({
+      note: {
+        observe: "observe-2",
+        context: "context-2",
+        technique: "technique-2",
+        sources: []
+      },
+      meta: {
+        cacheHit: true,
+        forcedRefresh: false,
+        coalesced: false
+      }
+    });
+    expect(generationNumber).toBe(2);
+  });
+
+  test("GET /api/admin/study-notes lists persisted study notes", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-admin-study-notes-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    const adminApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      adminAuth: {
+        username: "admin",
+        password: "secret"
+      },
+      workInfoGenerator: {
+        model: "gpt-test",
+        promptVersion: "art-study-note-v1",
+        async explainWorkForArtStudent() {
+          return {
+            observe: "Notice the slant of the wrecked mast.",
+            context: "The medal marks a naval disaster remembered through commemorative design.",
+            technique: "The relief surface uses tight contours to keep the imagery legible at small scale.",
+            sources: [
+              {
+                startIndex: 0,
+                endIndex: 12,
+                url: "https://www.metmuseum.org/art/collection/search/5046",
+                title: 'The "Shipwreck Medal" | The Met'
+              }
+            ]
+          };
+        }
+      }
+    });
+
+    const generateResponse = await makeRequest("/api/works/5046/ai-info", adminApp, {
+      method: "POST"
+    });
+    const listResponse = await makeAdminRequest("/api/admin/study-notes", adminApp);
+
+    expect(generateResponse.statusCode).toBe(200);
+    expect(listResponse.statusCode).toBe(200);
+    expect(JSON.parse(listResponse._getData())).toEqual({
+      results: [
+        expect.objectContaining({
+          objectId: 5046,
+          title: 'The "Shipwreck Medal"',
+          artist: "Salathiel Ellis",
+          model: "gpt-test",
+          promptVersion: "art-study-note-v1",
+          observe: "Notice the slant of the wrecked mast.",
+          context: "The medal marks a naval disaster remembered through commemorative design.",
+          technique: "The relief surface uses tight contours to keep the imagery legible at small scale.",
+          sources: [
+            {
+              startIndex: 0,
+              endIndex: 12,
+              url: "https://www.metmuseum.org/art/collection/search/5046",
+              title: 'The "Shipwreck Medal" | The Met'
+            }
+          ],
+          createdAt: expect.any(String),
+          updatedAt: expect.any(String)
+        })
+      ]
     });
   });
 
