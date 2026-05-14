@@ -442,7 +442,8 @@ export function normalizeCatalogImportRow(row) {
     primaryImageSmall: normalizeString(readField(row, "Primary Image Small", "PrimaryImageSmall")),
     hydrationStatus: "pending",
     hydrationError: "",
-    hydratedAt: ""
+    hydratedAt: "",
+    dimensionsCheckedAt: ""
   };
 }
 

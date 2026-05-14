@@ -213,6 +213,9 @@ describe("catalog import command", () => {
       artist: "Unknown",
       date: "ca. 1800",
       context: "Mantel - Wood, composition ornament",
+      dimensions: `60 5/8 in. × 88 in. × 9 3/4 in. (154 × 223.5 × 24.8 cm)
+9 3/4" Depth with harware
+7 3/4" Depth without hardware`,
       imageUrl: "",
       metUrl: "http://www.metmuseum.org/art/collection/search/4926",
       isPublicDomain: true
@@ -296,6 +299,7 @@ describe("catalog import command", () => {
       artist: "Salathiel Ellis",
       date: "1845–57",
       context: "Medal - Bronze",
+      dimensions: "Diam. 2 5/8 in. (6.7 cm)",
       imageUrl: "",
       metUrl: "http://www.metmuseum.org/art/collection/search/5046",
       isPublicDomain: true

@@ -113,6 +113,8 @@ export async function runCatalogHydration({
         hydrationStatus: "retry",
         hydrationError,
         hydratedAt: now(),
+        dimensions: "",
+        dimensionsCheckedAt: "",
         primaryImage: "",
         primaryImageSmall: ""
       });
@@ -141,6 +143,8 @@ export async function runCatalogHydration({
         hydrationStatus: "retry",
         hydrationError: "http_403",
         hydratedAt: now(),
+        dimensions: "",
+        dimensionsCheckedAt: "",
         primaryImage: "",
         primaryImageSmall: ""
       });
@@ -158,6 +162,8 @@ export async function runCatalogHydration({
         hydrationStatus: "failed",
         hydrationError: "http_404",
         hydratedAt: now(),
+        dimensions: "",
+        dimensionsCheckedAt: now(),
         primaryImage: "",
         primaryImageSmall: ""
       });
@@ -188,6 +194,8 @@ export async function runCatalogHydration({
         hydrationStatus: "retry",
         hydrationError,
         hydratedAt: now(),
+        dimensions: "",
+        dimensionsCheckedAt: "",
         primaryImage: "",
         primaryImageSmall: ""
       });
@@ -216,6 +224,8 @@ export async function runCatalogHydration({
         hydrationStatus: "retry",
         hydrationError: "non_json_response",
         hydratedAt: now(),
+        dimensions: "",
+        dimensionsCheckedAt: "",
         primaryImage: "",
         primaryImageSmall: ""
       });
@@ -236,10 +246,12 @@ export async function runCatalogHydration({
     const payload = await response.json();
     const primaryImage = payload.primaryImage ?? "";
     const primaryImageSmall = payload.primaryImageSmall ?? "";
+    const dimensions = String(payload.dimensions ?? "").trim();
     const hydrationStatus = primaryImage || primaryImageSmall ? "hydrated" : "no_image";
     const result = {
       objectId,
       hydrationStatus,
+      dimensions,
       primaryImage,
       primaryImageSmall
     };
@@ -250,6 +262,8 @@ export async function runCatalogHydration({
       hydrationStatus,
       hydrationError: "",
       hydratedAt: now(),
+      dimensions,
+      dimensionsCheckedAt: now(),
       primaryImage,
       primaryImageSmall
     });

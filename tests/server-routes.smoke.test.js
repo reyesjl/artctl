@@ -8,7 +8,11 @@ import httpMocks from "node-mocks-http";
 import { createArtctlApp } from "../server/app.js";
 import { createUninitializedCatalog } from "../server/catalog.js";
 import { runCatalogImport } from "../server/catalog-import.js";
-import { getObjectHydrationState, initializeCatalogSqlite } from "../server/catalog-sqlite.js";
+import {
+  getObjectHydrationState,
+  initializeCatalogSqlite,
+  updateObjectHydration
+} from "../server/catalog-sqlite.js";
 import { createMetApiClient } from "../server/met-api.js";
 import { createTrackedTempDir } from "./temp-dir.js";
 
@@ -1192,6 +1196,7 @@ describe("work detail API", () => {
           artist: "Japanese",
           date: "ca. 1830-32",
           context: "Print - Polychrome woodblock print; ink and color on paper",
+          dimensions: "25.7 x 37.9 cm",
           imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
           metUrl: "https://www.metmuseum.org/art/collection/search/45434"
         };
@@ -1208,6 +1213,7 @@ describe("work detail API", () => {
       artist: "Japanese",
       date: "ca. 1830-32",
       context: "Print - Polychrome woodblock print; ink and color on paper",
+      dimensions: "25.7 x 37.9 cm",
       imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
       metUrl: "https://www.metmuseum.org/art/collection/search/45434"
     });
@@ -1266,6 +1272,7 @@ describe("work detail API", () => {
       artist: "Japanese",
       date: "ca. 1830-32",
       context: "Print - Polychrome woodblock print; ink and color on paper",
+      dimensions: "",
       imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
       metUrl: "https://www.metmuseum.org/art/collection/search/45434"
     });
@@ -1338,6 +1345,7 @@ describe("work detail API", () => {
       artist: "Gustave Baumann",
       date: "1920",
       context: "Color woodcut - Ink and color on paper",
+      dimensions: "",
       imageUrl: "",
       metUrl: "https://www.metmuseum.org/art/collection/search/486055"
     });
@@ -1438,6 +1446,7 @@ describe("work detail API", () => {
       artist: "Salathiel Ellis",
       date: "1845–57",
       context: "Medal - Bronze",
+      dimensions: "",
       imageUrl: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
       metUrl: "http://www.metmuseum.org/art/collection/search/5046",
       isPublicDomain: true
@@ -1455,6 +1464,113 @@ describe("work detail API", () => {
       primaryImage: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
       primaryImageSmall: "https://images.metmuseum.org/CRDImages/aw/web-large/DT5046.jpg"
     });
+  });
+
+  test("GET /api/works/:objectId rehydrates a previously hydrated work when dimensions are blank and unchecked", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-detail-dimensions-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const hydrationRequests = [];
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    updateObjectHydration({
+      databasePath,
+      objectId: 5046,
+      hydrationStatus: "hydrated",
+      hydrationError: "",
+      hydratedAt: "2026-05-14T12:00:00.000Z",
+      primaryImage: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
+      primaryImageSmall: "https://images.metmuseum.org/CRDImages/aw/web-large/DT5046.jpg"
+    });
+
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: async (resource) => {
+        hydrationRequests.push(String(resource));
+
+        return createJsonResponse({
+          objectID: 5046,
+          primaryImage: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/aw/web-large/DT5046.jpg",
+          dimensions: "7 x 7/8 in. (20 cm)"
+        });
+      }
+    });
+
+    const firstResponse = await makeRequest("/api/works/5046", detailApp);
+    const secondResponse = await makeRequest("/api/works/5046", detailApp);
+
+    expect(firstResponse.statusCode).toBe(200);
+    expect(JSON.parse(firstResponse._getData())).toMatchObject({
+      objectId: 5046,
+      dimensions: "7 x 7/8 in. (20 cm)"
+    });
+    expect(secondResponse.statusCode).toBe(200);
+    expect(JSON.parse(secondResponse._getData())).toMatchObject({
+      objectId: 5046,
+      dimensions: "7 x 7/8 in. (20 cm)"
+    });
+    expect(hydrationRequests).toEqual([
+      "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
+    ]);
+    expect(getObjectHydrationState({ databasePath, objectId: 5046 })).toMatchObject({
+      hydrationStatus: "hydrated",
+      dimensions: "7 x 7/8 in. (20 cm)"
+    });
+    expect(getObjectHydrationState({ databasePath, objectId: 5046 }).dimensionsCheckedAt).toBeTruthy();
+  });
+
+  test("GET /api/works/:objectId does not rehydrate dimensions again after a blank dimensions check was recorded", async () => {
+    const tempDir = createTrackedTempDir(path.join(os.tmpdir(), "artctl-detail-dimensions-"));
+    const databasePath = path.join(tempDir, "catalog.sqlite");
+    const hydrationRequests = [];
+
+    expect(
+      runCatalogImport({
+        csvPath: path.resolve("tests/fixtures/metobjects-real-subset.csv"),
+        databasePath
+      }).ok
+    ).toBe(true);
+
+    updateObjectHydration({
+      databasePath,
+      objectId: 5046,
+      hydrationStatus: "hydrated",
+      hydrationError: "",
+      hydratedAt: "2026-05-14T12:00:00.000Z",
+      dimensions: "",
+      dimensionsCheckedAt: "2026-05-14T12:00:00.000Z",
+      primaryImage: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
+      primaryImageSmall: "https://images.metmuseum.org/CRDImages/aw/web-large/DT5046.jpg"
+    });
+
+    const detailApp = createArtctlApp({
+      catalogDatabasePath: databasePath,
+      hydrationFetchImpl: async (resource) => {
+        hydrationRequests.push(String(resource));
+
+        return createJsonResponse({
+          objectID: 5046,
+          primaryImage: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/aw/web-large/DT5046.jpg",
+          dimensions: ""
+        });
+      }
+    });
+
+    const response = await makeRequest("/api/works/5046", detailApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toMatchObject({
+      objectId: 5046,
+      dimensions: ""
+    });
+    expect(hydrationRequests).toEqual([]);
   });
 
   test("GET /api/works/:objectId records a no_image hydration outcome and still returns local metadata", async () => {
@@ -2445,6 +2561,7 @@ describe("gallery API", () => {
         artist: "Japanese",
         date: "ca. 1830-32",
         context: "Print - Polychrome woodblock print; ink and color on paper",
+        dimensions: "",
         imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
         metUrl: "https://www.metmuseum.org/art/collection/search/45434"
       });

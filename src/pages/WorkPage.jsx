@@ -30,7 +30,17 @@ const MODE_PRESENTATION = {
 };
 
 function getModeButtonClassName(isActive) {
-  return isActive ? "text-action text-primary" : "text-action";
+  return isActive ? "text-action viewer-mode-button text-primary" : "text-action viewer-mode-button";
+}
+
+function getNextMode(currentMode) {
+  const currentIndex = VIEWER_MODES.indexOf(currentMode);
+
+  if (currentIndex === -1) {
+    return VIEWER_MODES[0];
+  }
+
+  return VIEWER_MODES[(currentIndex + 1) % VIEWER_MODES.length];
 }
 
 function normalizeStudyNote(data) {
@@ -105,13 +115,16 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [isOpenAccessInfoVisible, setIsOpenAccessInfoVisible] = useState(false);
   const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
   const [isMobileDetailsExpanded, setIsMobileDetailsExpanded] = useState(false);
+  const [isDesktopViewerHovered, setIsDesktopViewerHovered] = useState(false);
   const [scale, setScale] = useState(MIN_SCALE);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [activeMode, setActiveMode] = useState("original");
   const dragStateRef = useRef(null);
   const lastTapAtRef = useRef(0);
+  const figureRef = useRef(null);
   const imageRef = useRef(null);
   const imageStageRef = useRef(null);
+  const modeButtonRefs = useRef({});
   const studySheetTouchRef = useRef(null);
 
   useEffect(() => {
@@ -160,6 +173,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     setIsOpenAccessInfoVisible(false);
     setIsPrintModalVisible(false);
     setIsMobileDetailsExpanded(false);
+    setIsDesktopViewerHovered(false);
     dragStateRef.current = null;
     lastTapAtRef.current = 0;
     studySheetTouchRef.current = null;
@@ -170,15 +184,23 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       return undefined;
     }
 
+    function focusModeButton(nextMode) {
+      modeButtonRefs.current[nextMode]?.focus();
+    }
+
     function handleKeyDown(event) {
       if (event.key === "1") {
         setActiveMode("original");
+        focusModeButton("original");
       } else if (event.key === "2") {
         setActiveMode("edges");
+        focusModeButton("edges");
       } else if (event.key === "3") {
         setActiveMode("detail");
+        focusModeButton("detail");
       } else if (event.key === "4") {
         setActiveMode("composition");
+        focusModeButton("composition");
       }
     }
 
@@ -189,14 +211,62 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     };
   }, [work?.imageUrl]);
 
-  function updateScale(nextScale) {
+  useEffect(() => {
+    if (isMobileLayout || !work?.imageUrl || !figureRef.current) {
+      return undefined;
+    }
+
+    const figureElement = figureRef.current;
+    const handleWheel = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const nextScale = event.deltaY < 0 ? scale + SCALE_STEP : scale - SCALE_STEP;
+
+      updateScale(nextScale, {
+        clientX: event.clientX,
+        clientY: event.clientY
+      });
+    };
+
+    figureElement.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      figureElement.removeEventListener("wheel", handleWheel);
+    };
+  }, [isMobileLayout, scale, pan, work?.imageUrl]);
+
+  function updateScale(nextScale, options = {}) {
     const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
 
-    setScale(clampedScale);
-
     if (clampedScale === MIN_SCALE) {
+      setScale(clampedScale);
       setPan({ x: 0, y: 0 });
+      return;
     }
+
+    const focalPoint = options.clientX != null && options.clientY != null
+      ? { clientX: options.clientX, clientY: options.clientY }
+      : null;
+
+    if (!focalPoint || !imageStageRef.current || scale === MIN_SCALE && clampedScale === scale) {
+      setScale(clampedScale);
+      return;
+    }
+
+    const stageRect = imageStageRef.current.getBoundingClientRect();
+    const pointFromCenter = {
+      x: focalPoint.clientX - (stageRect.left + stageRect.width / 2),
+      y: focalPoint.clientY - (stageRect.top + stageRect.height / 2)
+    };
+    const scaleRatio = clampedScale / scale;
+    const anchoredPan = {
+      x: pointFromCenter.x - (pointFromCenter.x - pan.x) * scaleRatio,
+      y: pointFromCenter.y - (pointFromCenter.y - pan.y) * scaleRatio
+    };
+
+    setScale(clampedScale);
+    setPan(anchoredPan);
   }
 
   function clampPan(nextPan, nextScale) {
@@ -275,6 +345,11 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }
 
   function handleTouchStart(event) {
+    if (isMobileLayout) {
+      dragStateRef.current = null;
+      return;
+    }
+
     if (event.touches.length === 2) {
       dragStateRef.current = {
         kind: "pinch",
@@ -301,6 +376,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }
 
   function handleTouchMove(event) {
+    if (isMobileLayout) {
+      return;
+    }
+
     if (!dragStateRef.current) {
       return;
     }
@@ -343,6 +422,11 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   }
 
   function handleTouchEnd(event) {
+    if (isMobileLayout) {
+      dragStateRef.current = null;
+      return;
+    }
+
     const tappedOnce =
       event.changedTouches.length === 1 &&
       dragStateRef.current &&
@@ -371,6 +455,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     }
 
     setActiveMode(nextMode);
+  }
+
+  function handleCycleMode() {
+    setActiveMode((currentMode) => getNextMode(currentMode));
   }
 
   async function handleLoadAiInfo() {
@@ -461,6 +549,14 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const displayedTitle = work?.title
     ? `${work.title}${currentModePresentation.suffix}`
     : `Work ${objectId}`;
+  const workTitle = work?.title || `Work ${objectId}`;
+  const imageTransform = isMobileLayout
+    ? "translate(0px, 0px) scale(1)"
+    : `translate(${pan.x}px, ${pan.y}px) scale(${scale})`;
+  const imageCursor = !isMobileLayout && scale > MIN_SCALE
+    ? (dragStateRef.current ? "grabbing" : "grab")
+    : "default";
+  const imageTransition = !isMobileLayout && dragStateRef.current ? "none" : "transform 150ms ease";
   const studyFields = getStudyFields(aiNote);
   const showExpandedMetadata = !isMobileLayout || isMobileDetailsExpanded;
   const studyContent = (
@@ -524,12 +620,13 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       ) : null}
     </>
   );
-  const viewerControls = (
+  const desktopZoomLabel = isDesktopViewerHovered ? "[scroll zoom]" : "zoom";
+  const desktopViewerControls = (
     <div
       className="flex flex-wrap items-center gap-2 rounded-sm border border-border bg-background/45 px-3 py-2 text-xs text-foreground/80 shadow-sm transition-colors hover:bg-background/60 hover:text-foreground focus-within:bg-background/60 focus-within:text-foreground"
       aria-label="Artwork inspection controls"
     >
-      <span>zoom</span>
+      <span>{desktopZoomLabel}</span>
       <button
         type="button"
         className="text-action"
@@ -565,6 +662,9 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       <span>mode</span>
       <button
         type="button"
+        ref={(element) => {
+          modeButtonRefs.current.original = element;
+        }}
         className={getModeButtonClassName(activeMode === "original")}
         aria-label="Original mode"
         aria-pressed={activeMode === "original"}
@@ -574,6 +674,9 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       </button>
       <button
         type="button"
+        ref={(element) => {
+          modeButtonRefs.current.edges = element;
+        }}
         className={getModeButtonClassName(activeMode === "edges")}
         aria-label="Edges mode"
         aria-pressed={activeMode === "edges"}
@@ -583,6 +686,9 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       </button>
       <button
         type="button"
+        ref={(element) => {
+          modeButtonRefs.current.detail = element;
+        }}
         className={getModeButtonClassName(activeMode === "detail")}
         aria-label="Detail mode"
         aria-pressed={activeMode === "detail"}
@@ -592,6 +698,9 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       </button>
       <button
         type="button"
+        ref={(element) => {
+          modeButtonRefs.current.composition = element;
+        }}
         className={getModeButtonClassName(activeMode === "composition")}
         aria-label="Composition mode"
         aria-pressed={activeMode === "composition"}
@@ -610,26 +719,65 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       </button>
     </div>
   );
+  const mobileViewerControls = (
+    <div
+      className="grid grid-cols-2 gap-2 rounded-sm border border-border bg-background/45 px-3 py-2 text-xs text-foreground/80 shadow-sm"
+      aria-label="Artwork inspection controls"
+    >
+      <button
+        type="button"
+        className="text-action text-left"
+        aria-label="Cycle analysis mode"
+        onClick={handleCycleMode}
+      >
+        {`[mode: ${activeMode}]`}
+      </button>
+      <button
+        type="button"
+        className="text-action"
+        aria-label="Study it"
+        onClick={handleLoadAiInfo}
+        disabled={aiInfoStatus === "loading"}
+      >
+        [study it]
+      </button>
+    </div>
+  );
 
   return (
     <RouteFrame maxWidthClassName="max-w-7xl">
-      <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
-        {work?.title || `Work ${objectId}`}
-      </div>
+      {!isMobileLayout ? (
+        <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
+          {workTitle}
+        </div>
+      ) : null}
       {work ? (
         <div className="mt-4 grid gap-4">
           <div
             className="work-viewer grid gap-4 sm:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)] sm:items-start"
           >
             <figure
-              className="work-image-frame relative m-0 overflow-hidden border border-border bg-secondary"
+              ref={figureRef}
+              className={`work-image-frame relative m-0 overflow-hidden border bg-secondary transition-colors ${
+                !isMobileLayout && isDesktopViewerHovered ? "border-primary" : "border-border"
+              }`}
               aria-label={work.imageUrl ? "Artwork viewer" : undefined}
+              onMouseEnter={() => {
+                if (!isMobileLayout) {
+                  setIsDesktopViewerHovered(true);
+                }
+              }}
+              onMouseLeave={() => {
+                if (!isMobileLayout) {
+                  setIsDesktopViewerHovered(false);
+                }
+              }}
             >
               {work.imageUrl ? (
                 <>
                   {!isMobileLayout ? (
                     <figcaption className="absolute left-3 top-3 z-10">
-                      {viewerControls}
+                      {desktopViewerControls}
                     </figcaption>
                   ) : null}
                   <div ref={imageStageRef} className="work-image-stage min-h-[320px] overflow-hidden">
@@ -644,16 +792,16 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                       onMouseMove={handleMouseMove}
                       onMouseUp={handleMouseUp}
                       onMouseLeave={handleMouseUp}
-                      onTouchStart={handleTouchStart}
-                      onTouchMove={handleTouchMove}
-                      onTouchEnd={handleTouchEnd}
-                      onTouchCancel={handleTouchEnd}
+                      onTouchStart={isMobileLayout ? undefined : handleTouchStart}
+                      onTouchMove={isMobileLayout ? undefined : handleTouchMove}
+                      onTouchEnd={isMobileLayout ? undefined : handleTouchEnd}
+                      onTouchCancel={isMobileLayout ? undefined : handleTouchEnd}
                       style={{
-                        cursor: scale > MIN_SCALE ? (dragStateRef.current ? "grabbing" : "grab") : "default",
+                        cursor: imageCursor,
                         filter: currentModePresentation.filter,
-                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+                        transform: imageTransform,
                         transformOrigin: "center center",
-                        transition: dragStateRef.current ? "none" : "transform 150ms ease"
+                        transition: imageTransition
                       }}
                     />
                   </div>
@@ -672,7 +820,12 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                 </p>
               )}
             </figure>
-            {work.imageUrl && isMobileLayout ? viewerControls : null}
+            {work.imageUrl && isMobileLayout ? mobileViewerControls : null}
+            {isMobileLayout ? (
+              <div aria-level="1" role="heading" className="m-0 text-lg font-semibold">
+                {workTitle}
+              </div>
+            ) : null}
             <section
               className="work-metadata grid gap-3 border-t border-border sm:mt-0 sm:border-l sm:border-t-0 sm:pl-4"
               aria-label="Work metadata"
@@ -715,6 +868,14 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                       </dt>
                       <dd className="m-0">{work.context}</dd>
                     </div>
+                    {work.dimensions ? (
+                      <div className="work-metadata-item grid gap-1">
+                        <dt className="text-xs text-muted-foreground">
+                          Dimensions
+                        </dt>
+                        <dd className="m-0">{work.dimensions}</dd>
+                      </div>
+                    ) : null}
                   </dl>
                   {work.imageUrl && work.isPublicDomain ? (
                     <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
@@ -750,17 +911,19 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                     <span>[Share this Work]</span>
                     <Share2 className="h-4 w-4" aria-hidden="true" />
                   </button>
-                  <button
-                    type="button"
-                    aria-label="[Buy a Print]"
-                    className="inline-flex items-center gap-1 text-xs text-primary"
-                    onClick={() => {
-                      setIsPrintModalVisible(true);
-                    }}
-                  >
-                    <span>[Buy a Print]</span>
-                    <Receipt className="h-4 w-4" aria-hidden="true" />
-                  </button>
+                  {work.imageUrl ? (
+                    <button
+                      type="button"
+                      aria-label="[Buy a Print]"
+                      className="inline-flex items-center gap-1 text-xs text-primary"
+                      onClick={() => {
+                        setIsPrintModalVisible(true);
+                      }}
+                    >
+                      <span>[Buy a Print]</span>
+                      <Receipt className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  ) : null}
                 </>
               ) : null}
             </section>

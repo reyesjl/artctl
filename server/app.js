@@ -152,12 +152,16 @@ export function createArtctlApp(options = {}) {
     if (catalog?.getWork) {
       if (catalogDatabasePath) {
         const hydrationState = getObjectHydrationState({ databasePath: catalogDatabasePath, objectId });
-
-        if (
+        const shouldHydratePendingImages =
           hydrationState?.hydrationStatus === "pending" &&
           !hydrationState.primaryImage &&
-          !hydrationState.primaryImageSmall
-        ) {
+          !hydrationState.primaryImageSmall;
+        const shouldHydrateUncheckedDimensions =
+          hydrationState?.hydrationStatus === "hydrated" &&
+          !hydrationState?.dimensions &&
+          !hydrationState?.dimensionsCheckedAt;
+
+        if (shouldHydratePendingImages || shouldHydrateUncheckedDimensions) {
           try {
             await runCatalogHydration({
               databasePath: catalogDatabasePath,

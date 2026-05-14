@@ -91,6 +91,7 @@ function normalizeWorkDetail(record) {
     artist: normalizeArtist(record),
     date: normalizeDate(record),
     context: normalizeContext(record),
+    dimensions: String(record.dimensions ?? "").trim(),
     imageUrl: record.primaryImage || record.primaryImageSmall || "",
     metUrl: record.objectURL || `https://www.metmuseum.org/art/collection/search/${record.objectID}`,
     isPublicDomain: Boolean(record.isPublicDomain)

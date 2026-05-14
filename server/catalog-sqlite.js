@@ -61,7 +61,8 @@ const catalogObjectColumns = [
   ["primaryImageSmall", "primary_image_small", "TEXT NOT NULL"],
   ["hydrationStatus", "hydration_status", "TEXT NOT NULL"],
   ["hydrationError", "hydration_error", "TEXT NOT NULL"],
-  ["hydratedAt", "hydrated_at", "TEXT NOT NULL"]
+  ["hydratedAt", "hydrated_at", "TEXT NOT NULL"],
+  ["dimensionsCheckedAt", "dimensions_checked_at", "TEXT NOT NULL"]
 ];
 
 const objectColumnNames = catalogObjectColumns.map(([, columnName]) => columnName);
@@ -124,6 +125,7 @@ const catalogRecordProjectionSql = `
   objects.object_date AS objectDate,
   objects.department AS department,
   objects.medium AS medium,
+  objects.dimensions AS dimensions,
   objects.object_name AS objectName,
   objects.primary_image AS primaryImage,
   objects.primary_image_small AS primaryImageSmall,
@@ -238,9 +240,15 @@ export function initializeCatalogSqlite(databasePath) {
     database.exec(curatedGroupObjectSchemaSql);
     database.exec(artworkSuggestionSchemaSql);
     const curatedGroupColumns = database.prepare("PRAGMA table_info(curated_groups)").all();
+    const objectColumns = database.prepare("PRAGMA table_info(objects)").all();
     if (!curatedGroupColumns.some((column) => column.name === "is_homepage_featured")) {
       database.exec(
         "ALTER TABLE curated_groups ADD COLUMN is_homepage_featured INTEGER NOT NULL DEFAULT 0"
+      );
+    }
+    if (!objectColumns.some((column) => column.name === "dimensions_checked_at")) {
+      database.exec(
+        "ALTER TABLE objects ADD COLUMN dimensions_checked_at TEXT NOT NULL DEFAULT ''"
       );
     }
     ensureHomepageCuratedGroup(database);
@@ -1223,6 +1231,8 @@ export function updateObjectHydration({
   hydrationStatus,
   hydrationError = "",
   hydratedAt,
+  dimensions = "",
+  dimensionsCheckedAt = "",
   primaryImage = "",
   primaryImageSmall = ""
 }) {
@@ -1232,6 +1242,8 @@ export function updateObjectHydration({
         `
           UPDATE objects
           SET
+            dimensions = ?,
+            dimensions_checked_at = ?,
             primary_image = ?,
             primary_image_small = ?,
             hydration_status = ?,
@@ -1241,6 +1253,8 @@ export function updateObjectHydration({
         `
       )
       .run(
+        dimensions,
+        dimensionsCheckedAt,
         primaryImage,
         primaryImageSmall,
         hydrationStatus,
@@ -1258,6 +1272,8 @@ export function getObjectHydrationState({ databasePath, objectId }) {
         `
           SELECT
             object_id AS objectId,
+            dimensions AS dimensions,
+            dimensions_checked_at AS dimensionsCheckedAt,
             primary_image AS primaryImage,
             primary_image_small AS primaryImageSmall,
             hydration_status AS hydrationStatus,

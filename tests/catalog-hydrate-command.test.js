@@ -92,6 +92,7 @@ describe("catalog hydrate command", () => {
         {
           objectId: 5046,
           hydrationStatus: "hydrated",
+          dimensions: "",
           primaryImage: "https://images.metmuseum.org/primary/5046.jpg",
           primaryImageSmall: "https://images.metmuseum.org/small/5046.jpg"
         }
@@ -136,6 +137,7 @@ describe("catalog hydrate command", () => {
         {
           objectId: 5046,
           hydrationStatus: "hydrated",
+          dimensions: "",
           primaryImage: "https://images.metmuseum.org/primary/5046.jpg",
           primaryImageSmall: "https://images.metmuseum.org/small/5046.jpg"
         }
@@ -201,6 +203,7 @@ describe("catalog hydrate command", () => {
         {
           objectId: 5046,
           hydrationStatus: "hydrated",
+          dimensions: "",
           primaryImage: "https://images.metmuseum.org/primary/5046.jpg",
           primaryImageSmall: "https://images.metmuseum.org/small/5046.jpg"
         }
@@ -278,12 +281,14 @@ describe("catalog hydrate command", () => {
         {
           objectId: 4926,
           hydrationStatus: "no_image",
+          dimensions: "",
           primaryImage: "",
           primaryImageSmall: ""
         },
         {
           objectId: 5046,
           hydrationStatus: "no_image",
+          dimensions: "",
           primaryImage: "",
           primaryImageSmall: ""
         }
@@ -369,12 +374,14 @@ describe("catalog hydrate command", () => {
         {
           objectId: 4926,
           hydrationStatus: "no_image",
+          dimensions: "",
           primaryImage: "",
           primaryImageSmall: ""
         },
         {
           objectId: 5046,
           hydrationStatus: "no_image",
+          dimensions: "",
           primaryImage: "",
           primaryImageSmall: ""
         }

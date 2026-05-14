@@ -116,6 +116,7 @@ describe("catalog import cli", () => {
       artist: "Salathiel Ellis",
       date: "1845–57",
       context: "Medal - Bronze",
+      dimensions: "Diam. 2 5/8 in. (6.7 cm)",
       imageUrl: "",
       metUrl: "http://www.metmuseum.org/art/collection/search/5046",
       isPublicDomain: true

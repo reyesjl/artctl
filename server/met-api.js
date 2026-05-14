@@ -79,6 +79,7 @@ function normalizeWorkDetail(object) {
     artist: normalizeArtist(object),
     date: normalizeDate(object),
     context: normalizeContext(object),
+    dimensions: String(object.dimensions ?? "").trim(),
     imageUrl: object.primaryImage || object.primaryImageSmall || "",
     metUrl: object.objectURL || `https://www.metmuseum.org/art/collection/search/${object.objectID}`
   };

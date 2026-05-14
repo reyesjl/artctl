@@ -380,6 +380,7 @@ describe("catalog import", () => {
       objectEndDate: 1887,
       objectName: "Painting",
       medium: "Oil on canvas",
+      dimensions: "92.1 x 73 cm",
       department: "European Paintings",
       period: "",
       dynasty: "",
@@ -424,7 +425,8 @@ describe("catalog import", () => {
       primaryImageSmall: "",
       hydrationStatus: "pending",
       hydrationError: "",
-      hydratedAt: ""
+      hydratedAt: "",
+      dimensionsCheckedAt: ""
     });
   });
 
@@ -487,6 +489,7 @@ describe("catalog import", () => {
           artistULANURL: "",
           artistWikidataURL: "",
           dimensions: "",
+          dimensionsCheckedAt: "",
           creditLine: "",
           geographyType: "",
           city: "",

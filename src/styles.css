@@ -99,6 +99,16 @@ a {
   color: hsl(var(--muted-foreground));
 }
 
+.viewer-mode-button:focus-visible {
+  color: hsl(var(--foreground));
+  outline: 1px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+.viewer-mode-button[aria-pressed="true"]:focus-visible {
+  color: hsl(var(--primary));
+}
+
 .app-header-strip {
   border-bottom: 1px solid hsl(var(--border));
 }

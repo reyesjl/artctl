@@ -177,6 +177,7 @@ describe("in-memory catalog", () => {
           objectDate: "ca. 1830-32",
           objectName: "Print",
           medium: "Polychrome woodblock print; ink and color on paper",
+          dimensions: "25.7 x 37.9 cm",
           primaryImage: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
           primaryImageSmall: "https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg",
           objectURL: "https://www.metmuseum.org/art/collection/search/45434",
@@ -191,6 +192,7 @@ describe("in-memory catalog", () => {
       artist: "Japanese",
       date: "ca. 1830-32",
       context: "Print - Polychrome woodblock print; ink and color on paper",
+      dimensions: "25.7 x 37.9 cm",
       imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
       metUrl: "https://www.metmuseum.org/art/collection/search/45434",
       isPublicDomain: true
