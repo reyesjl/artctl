@@ -62,6 +62,7 @@ describe("sqlite catalog round trip", () => {
     expect(catalog.isReady()).toBe(true);
     await expect(catalog.searchCollection({ query: "mantel" })).resolves.toEqual({
       query: "mantel",
+      totalResults: 1,
       results: [
         {
           objectId: 4926,
@@ -77,6 +78,7 @@ describe("sqlite catalog round trip", () => {
     });
     await expect(catalog.searchCollection({ query: "medal shipwreck" })).resolves.toEqual({
       query: "medal shipwreck",
+      totalResults: 1,
       results: [
         {
           objectId: 5046,
@@ -147,8 +149,11 @@ describe("sqlite catalog round trip", () => {
 
     const catalog = createRuntimeCatalog({ databasePath });
 
-    await expect(catalog.searchCollection({ query: "work" })).resolves.toEqual({
+    await expect(
+      catalog.searchCollection({ query: "work", excludeRestricted: false })
+    ).resolves.toEqual({
       query: "work",
+      totalResults: 2,
       results: [
         {
           objectId: 2,
@@ -211,6 +216,7 @@ describe("sqlite catalog round trip", () => {
     expect(catalog.isReady()).toBe(true);
     await expect(catalog.searchCollection({ query: "synthetic work 1000" })).resolves.toEqual({
       query: "synthetic work 1000",
+      totalResults: 1,
       results: [
         {
           objectId: 1000,

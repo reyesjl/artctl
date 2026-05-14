@@ -129,6 +129,7 @@ const catalogRecordProjectionSql = `
   objects.object_name AS objectName,
   objects.primary_image AS primaryImage,
   objects.primary_image_small AS primaryImageSmall,
+  objects.hydration_status AS hydrationStatus,
   objects.is_public_domain AS isPublicDomain,
   objects.object_url AS objectURL,
   objects.department_id AS departmentId
@@ -605,6 +606,9 @@ export function createSqliteCatalog({
       const ftsQuery = normalizeFtsQuery(normalizedSearch.query);
       const departmentClause =
         normalizedSearch.departmentId == null ? "" : "AND department_id = ?";
+      const restrictedClause = normalizedSearch.excludeRestricted
+        ? "AND objects.is_public_domain = 1"
+        : "";
       const rows = withDatabase(databasePath, (database) =>
         database
           .prepare(
@@ -614,6 +618,7 @@ export function createSqliteCatalog({
               JOIN objects_fts ON objects_fts.object_id = objects.object_id
               WHERE objects_fts MATCH ?
               ${departmentClause}
+              ${restrictedClause}
               ORDER BY objects.object_id
             `
           )
@@ -630,6 +635,7 @@ export function createSqliteCatalog({
 
       return {
         query: normalizedSearch.query,
+        totalResults: filteredRows.length,
         results: filteredRows
           .slice(pageStart, pageStart + searchPageSize)
           .map(normalizeSearchResult)

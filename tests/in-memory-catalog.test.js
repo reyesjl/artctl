@@ -22,6 +22,7 @@ describe("in-memory catalog", () => {
 
     await expect(catalog.searchCollection({ query: "sunflowers" })).resolves.toEqual({
       query: "sunflowers",
+      totalResults: 1,
       results: [
         {
           objectId: 436524,
@@ -69,6 +70,7 @@ describe("in-memory catalog", () => {
 
     await expect(catalog.searchCollection({ query: "work", medium: "wood" })).resolves.toEqual({
       query: "work",
+      totalResults: 1,
       results: [
         {
           objectId: 36483,
@@ -116,6 +118,7 @@ describe("in-memory catalog", () => {
 
     await expect(catalog.searchCollection({ query: "work", departmentId: 11 })).resolves.toEqual({
       query: "work",
+      totalResults: 1,
       results: [
         {
           objectId: 436524,
@@ -126,6 +129,110 @@ describe("in-memory catalog", () => {
           imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
           isPublicDomain: true,
           hasImage: true
+        }
+      ]
+    });
+  });
+
+  test("searchCollection hides restricted works by default", async () => {
+    const catalog = createInMemoryCatalog({
+      records: [
+        {
+          objectID: 436524,
+          title: "Open Work",
+          artistDisplayName: "Vincent van Gogh",
+          culture: "",
+          objectDate: "1887",
+          primaryImage: "",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
+          isPublicDomain: true
+        },
+        {
+          objectID: 486055,
+          title: "Restricted Work",
+          artistDisplayName: "Susan Rothenberg",
+          culture: "",
+          objectDate: "1992",
+          primaryImage: "",
+          primaryImageSmall: "",
+          isPublicDomain: false,
+          hydrationStatus: "no_image"
+        }
+      ]
+    });
+
+    await expect(catalog.searchCollection({ query: "work" })).resolves.toEqual({
+      query: "work",
+      totalResults: 1,
+      results: [
+        {
+          objectId: 436524,
+          title: "Open Work",
+          artist: "Vincent van Gogh",
+          date: "1887",
+          department: "",
+          imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
+          isPublicDomain: true,
+          hasImage: true
+        }
+      ]
+    });
+  });
+
+  test("searchCollection can include restricted works when explicitly requested", async () => {
+    const catalog = createInMemoryCatalog({
+      records: [
+        {
+          objectID: 436524,
+          title: "Open Work",
+          artistDisplayName: "Vincent van Gogh",
+          culture: "",
+          objectDate: "1887",
+          primaryImage: "",
+          primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
+          isPublicDomain: true
+        },
+        {
+          objectID: 486055,
+          title: "Restricted Work",
+          artistDisplayName: "Susan Rothenberg",
+          culture: "",
+          objectDate: "1992",
+          primaryImage: "",
+          primaryImageSmall: "",
+          isPublicDomain: false,
+          hydrationStatus: "no_image"
+        }
+      ]
+    });
+
+    await expect(
+      catalog.searchCollection({ query: "work", excludeRestricted: false })
+    ).resolves.toEqual({
+      query: "work",
+      totalResults: 2,
+      results: [
+        {
+          objectId: 436524,
+          title: "Open Work",
+          artist: "Vincent van Gogh",
+          date: "1887",
+          department: "",
+          imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
+          isPublicDomain: true,
+          hasImage: true,
+          hydrationStatus: ""
+        },
+        {
+          objectId: 486055,
+          title: "Restricted Work",
+          artist: "Susan Rothenberg",
+          date: "1992",
+          department: "",
+          imageUrl: "",
+          isPublicDomain: false,
+          hasImage: false,
+          hydrationStatus: "no_image"
         }
       ]
     });
@@ -151,6 +258,7 @@ describe("in-memory catalog", () => {
 
     await expect(catalog.searchCollection({ query: "work", page: 2 })).resolves.toEqual({
       query: "work",
+      totalResults: 13,
       results: [
         {
           objectId: 13,

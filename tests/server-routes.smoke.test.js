@@ -2310,11 +2310,13 @@ describe("search API", () => {
           query: "sunflowers",
           departmentId: null,
           medium: "",
-          page: 1
+          page: 1,
+          excludeRestricted: true
         });
 
         return {
           query: "sunflowers",
+          totalResults: 1,
           results: [
             {
               objectId: 436524,
@@ -2336,6 +2338,7 @@ describe("search API", () => {
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
       query: "sunflowers",
+      totalResults: 1,
       results: [
         {
           objectId: 436524,
@@ -2347,6 +2350,39 @@ describe("search API", () => {
           hasImage: true
         }
       ]
+    });
+  });
+
+  test("GET /api/search can explicitly include restricted works", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async searchCollection(searchState) {
+        expect(searchState).toEqual({
+          query: "sunflowers",
+          departmentId: null,
+          medium: "",
+          page: 1,
+          excludeRestricted: false
+        });
+
+        return {
+          query: "sunflowers",
+          totalResults: 0,
+          results: []
+        };
+      }
+    };
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search?q=sunflowers&excludeRestricted=false", searchApp);
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      query: "sunflowers",
+      totalResults: 0,
+      results: []
     });
   });
 
@@ -2617,6 +2653,7 @@ describe("search API", () => {
       expect(recoveredResponse.statusCode).toBe(200);
       expect(JSON.parse(recoveredResponse._getData())).toEqual({
         query: "iris",
+        totalResults: 1,
         results: [
           {
             objectId: 436524,
@@ -2676,6 +2713,7 @@ describe("search API", () => {
     expect(secondResponse.statusCode).toBe(200);
     expect(JSON.parse(secondResponse._getData())).toEqual({
       query: "van gogh",
+      totalResults: 1,
       results: [
         {
           objectId: 436524,
@@ -2739,6 +2777,7 @@ describe("search API", () => {
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
       query: "wave",
+      totalResults: 1,
       results: [
         {
           objectId: 486055,
@@ -2796,13 +2835,50 @@ describe("search API", () => {
     const payload = JSON.parse(response._getData());
 
     expect(response.statusCode).toBe(200);
+    expect(payload.totalResults).toBe(12);
     expect(payload.results).toHaveLength(12);
     expect(payload.results.map((result) => result.objectId)).toEqual([
       1, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15
     ]);
   });
 
-  test("GET /api/search returns explicit public-domain and image-availability flags", async () => {
+  test("GET /api/search returns the full totalResults count beyond the current page", async () => {
+    const metClient = createMetApiClient({
+      async fetchImpl(resource) {
+        const url = String(resource);
+
+        if (url.includes("/search?")) {
+          return createJsonResponse({
+            total: 15,
+            objectIDs: Array.from({ length: 15 }, (_, index) => index + 1)
+          });
+        }
+
+        const objectId = Number(url.split("/").at(-1));
+
+        return createJsonResponse({
+          objectID: objectId,
+          title: `Work ${objectId}`,
+          artistDisplayName: `Artist ${objectId}`,
+          culture: "",
+          objectDate: "1900",
+          primaryImage: "",
+          primaryImageSmall: `https://images.metmuseum.org/CRDImages/test/web-large/${objectId}.jpg`,
+          isPublicDomain: true
+        });
+      }
+    });
+    const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
+
+    const response = await makeRequest("/api/search?q=work", searchApp);
+    const payload = JSON.parse(response._getData());
+
+    expect(response.statusCode).toBe(200);
+    expect(payload.totalResults).toBe(15);
+    expect(payload.results).toHaveLength(12);
+  });
+
+  test("GET /api/search returns explicit public-domain and image-availability flags when restricted works are included", async () => {
     const metClient = createMetApiClient({
       async fetchImpl(resource) {
         const url = String(resource);
@@ -2845,11 +2921,15 @@ describe("search API", () => {
     });
     const searchApp = createArtctlApp({ metClient, allowLegacyMetRuntime: true });
 
-    const response = await makeRequest("/api/search?q=van%20gogh", searchApp);
+    const response = await makeRequest(
+      "/api/search?q=van%20gogh&excludeRestricted=false",
+      searchApp
+    );
 
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
       query: "van gogh",
+      totalResults: 2,
       results: [
         {
           objectId: 436524,

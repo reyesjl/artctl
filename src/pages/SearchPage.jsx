@@ -8,6 +8,24 @@ function normalizePageParam(value) {
   return Number.isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage;
 }
 
+function normalizeExcludeRestrictedParam(value) {
+  const normalizedValue = String(value ?? "").trim().toLowerCase();
+
+  if (["false", "0", "off", "no"].includes(normalizedValue)) {
+    return false;
+  }
+
+  return true;
+}
+
+function formatSearchDuration(durationMs) {
+  if (durationMs < 1000) {
+    return `${Math.round(durationMs)} ms`;
+  }
+
+  return `${(durationMs / 1000).toFixed(1)} s`;
+}
+
 const MEDIUM_OPTIONS = [
   {
     label: "Type",
@@ -31,18 +49,39 @@ const MEDIUM_OPTIONS = [
   }
 ];
 const SEARCH_PAGE_SIZE = 12;
+const PAGINATION_WINDOW_SIZE = 10;
+
+function buildPaginationWindow(page, totalResults) {
+  const totalPages = Math.max(1, Math.ceil(totalResults / SEARCH_PAGE_SIZE));
+  const windowIndex = Math.floor((page - 1) / PAGINATION_WINDOW_SIZE);
+  const windowStart = windowIndex * PAGINATION_WINDOW_SIZE + 1;
+  const windowEnd = Math.min(totalPages, windowStart + PAGINATION_WINDOW_SIZE - 1);
+
+  return {
+    totalPages,
+    windowStart,
+    windowEnd,
+    pages: Array.from({ length: windowEnd - windowStart + 1 }, (_, index) => windowStart + index)
+  };
+}
 
 export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q")?.trim() ?? "";
   const departmentId = searchParams.get("departmentId")?.trim() ?? "";
   const medium = searchParams.get("medium")?.trim() ?? "";
+  const excludeRestricted = normalizeExcludeRestrictedParam(
+    searchParams.get("excludeRestricted")
+  );
   const page = normalizePageParam(searchParams.get("page"));
   const [draftQuery, setDraftQuery] = useState(query);
   const [draftDepartmentId, setDraftDepartmentId] = useState(departmentId);
   const [draftMedium, setDraftMedium] = useState(medium);
+  const [draftExcludeRestricted, setDraftExcludeRestricted] = useState(excludeRestricted);
   const [departments, setDepartments] = useState([]);
   const [results, setResults] = useState([]);
+  const [totalResults, setTotalResults] = useState(0);
+  const [searchDurationMs, setSearchDurationMs] = useState(0);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("idle");
   const [showDepartments, setShowDepartments] = useState(false);
@@ -61,6 +100,10 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   useEffect(() => {
     setDraftMedium(medium);
   }, [medium]);
+
+  useEffect(() => {
+    setDraftExcludeRestricted(excludeRestricted);
+  }, [excludeRestricted]);
 
   useEffect(() => {
     let cancelled = false;
@@ -89,6 +132,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     async function loadResults() {
       setStatus("loading");
       setError("");
+      const startedAt = performance.now();
 
       try {
         const requestParams = new URLSearchParams({ q: query });
@@ -99,6 +143,10 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
         if (medium) {
           requestParams.set("medium", medium);
+        }
+
+        if (!excludeRestricted) {
+          requestParams.set("excludeRestricted", "false");
         }
 
         if (searchParams.has("page") || page !== 1) {
@@ -114,16 +162,24 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
         if (!response.ok) {
           setResults([]);
+          setTotalResults(0);
+          setSearchDurationMs(0);
           setError(data.error || "Unable to load search results.");
           setStatus("error");
           return;
         }
 
         setResults(data.results ?? []);
+        setTotalResults(
+          Number.isFinite(data.totalResults) ? data.totalResults : (data.results ?? []).length
+        );
+        setSearchDurationMs(Math.max(0, performance.now() - startedAt));
         setStatus("success");
       } catch (error) {
         if (!cancelled) {
           setResults([]);
+          setTotalResults(0);
+          setSearchDurationMs(0);
           setError(error instanceof Error ? error.message : "Unable to load search results.");
           setStatus("error");
         }
@@ -132,6 +188,8 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
 
     if (!query) {
       setResults([]);
+      setTotalResults(0);
+      setSearchDurationMs(0);
       setError("");
       setStatus("idle");
       return () => {
@@ -144,7 +202,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     return () => {
       cancelled = true;
     };
-  }, [apiBaseUrl, departmentId, fetchImpl, medium, page, query, searchParams]);
+  }, [apiBaseUrl, departmentId, excludeRestricted, fetchImpl, medium, page, query, searchParams]);
 
   useEffect(() => {
     function handleDocumentPointerDown(event) {
@@ -189,6 +247,10 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       nextSearchParams.medium = draftMedium;
     }
 
+    if (!draftExcludeRestricted) {
+      nextSearchParams.excludeRestricted = "false";
+    }
+
     setSearchParams(nextSearchParams);
   }
 
@@ -203,6 +265,10 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       nextSearchParams.medium = medium;
     }
 
+    if (!excludeRestricted) {
+      nextSearchParams.excludeRestricted = "false";
+    }
+
     if (nextPage > 1) {
       nextSearchParams.page = String(nextPage);
     }
@@ -213,6 +279,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   function handleClearFilters() {
     setDraftDepartmentId("");
     setDraftMedium("");
+    setDraftExcludeRestricted(true);
   }
 
   const activeDepartment = departments.find(
@@ -223,11 +290,15 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   );
   const activeFiltersLabel = [
     activeDepartment ? activeDepartment.displayName : null,
-    activeMedium ? activeMedium.label : null
+    activeMedium ? activeMedium.label : null,
+    !draftExcludeRestricted ? "Restricted visible" : null
   ]
     .filter(Boolean)
     .join(" · ");
-  const hasActiveFilters = Boolean(activeDepartment || activeMedium);
+  const hasActiveFilters = Boolean(activeDepartment || activeMedium || !draftExcludeRestricted);
+  const paginationWindow = buildPaginationWindow(page, totalResults);
+  const hasPreviousWindow = paginationWindow.windowStart > 1;
+  const hasNextWindow = paginationWindow.windowEnd < paginationWindow.totalPages;
 
   return (
     <RouteFrame maxWidthClassName="max-w-7xl">
@@ -347,6 +418,13 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
               >
                 [search]
               </button>
+              <button
+                type="button"
+                className={!draftExcludeRestricted ? "text-action text-primary" : "text-action"}
+                onClick={() => setDraftExcludeRestricted((current) => !current)}
+              >
+                {draftExcludeRestricted ? "[show restricted]" : "[hide restricted]"}
+              </button>
               {hasActiveFilters ? (
                 <button
                   type="button"
@@ -398,6 +476,19 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
               </optgroup>
             ))}
           </select>
+          <label
+            className="search-label block text-xs text-muted-foreground"
+            htmlFor="search-exclude-restricted"
+          >
+            Hide restricted works
+          </label>
+          <input
+            id="search-exclude-restricted"
+            name="excludeRestricted"
+            type="checkbox"
+            checked={draftExcludeRestricted}
+            onChange={(event) => setDraftExcludeRestricted(event.target.checked)}
+          />
         </div>
       </div>
       {hasActiveFilters ? (
@@ -407,6 +498,9 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
       {query && status === "error" ? <p>{error}</p> : null}
       {query && status === "success" ? (
         <>
+          <p className="m-0 text-xs text-muted-foreground">
+            {`${totalResults} ${totalResults === 1 ? "result" : "results"} · in ${formatSearchDuration(searchDurationMs)} · Page ${page}`}
+          </p>
           <ul className="search-results mt-4 list-none border-t border-border p-0">
             {results.map((result) => (
               <li key={result.objectId} className="search-result border-b border-border py-3">
@@ -416,14 +510,14 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                 <p className="search-result-meta mt-1 text-sm text-muted-foreground">
                   {[result.artist, result.date, result.department].filter(Boolean).join(" · ")}
                 </p>
-                {!result.isPublicDomain || !result.hasImage ? (
+                {!result.isPublicDomain || (!result.hasImage && result.hydrationStatus === "no_image") ? (
                   <p className="search-result-flags mt-2 flex flex-wrap gap-2">
                     {!result.isPublicDomain ? (
                       <span className="search-result-flag text-xs text-muted-foreground">
                         Rights Restricted
                       </span>
                     ) : null}
-                    {!result.hasImage ? (
+                    {!result.hasImage && result.hydrationStatus === "no_image" ? (
                       <span className="search-result-flag text-xs text-muted-foreground">
                         No Image Available
                       </span>
@@ -433,25 +527,36 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
               </li>
             ))}
           </ul>
-          {page > 1 || results.length === SEARCH_PAGE_SIZE ? (
-            <div className="search-pagination mt-4 flex flex-wrap items-center gap-3">
-              {page > 1 ? (
+          {paginationWindow.totalPages > 1 ? (
+            <div className="search-pagination mt-4 flex flex-wrap items-center justify-center gap-3">
+              {hasPreviousWindow ? (
                 <button
-                  aria-label="Prev page"
+                  aria-label="Prev page window"
                   className="text-action"
                   type="button"
-                  onClick={() => handlePageChange(page - 1)}
+                  onClick={() => handlePageChange(paginationWindow.windowStart - 1)}
                 >
                   [prev]
                 </button>
               ) : null}
-              <span className="text-xs text-muted-foreground">Page {page}</span>
-              {results.length === SEARCH_PAGE_SIZE ? (
+              {paginationWindow.pages.map((pageNumber) => (
                 <button
-                  aria-label="Next page"
+                  key={pageNumber}
+                  aria-label={`Page ${pageNumber}`}
+                  aria-current={pageNumber === page ? "page" : undefined}
+                  className={pageNumber === page ? "text-action text-primary" : "text-action"}
+                  type="button"
+                  onClick={() => handlePageChange(pageNumber)}
+                >
+                  [{pageNumber}]
+                </button>
+              ))}
+              {hasNextWindow ? (
+                <button
+                  aria-label="Next page window"
                   className="text-action"
                   type="button"
-                  onClick={() => handlePageChange(page + 1)}
+                  onClick={() => handlePageChange(paginationWindow.windowEnd + 1)}
                 >
                   [next]
                 </button>

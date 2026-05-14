@@ -25,13 +25,28 @@ function normalizePositiveInteger(value, defaultValue = 1) {
   return Number.isNaN(parsedValue) || parsedValue < 1 ? defaultValue : parsedValue;
 }
 
+function normalizeExcludeRestricted(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalizedValue = String(value ?? "").trim().toLowerCase();
+
+  if (["false", "0", "off", "no"].includes(normalizedValue)) {
+    return false;
+  }
+
+  return true;
+}
+
 function normalizeSearchState(input) {
   if (typeof input === "string") {
     return {
       query: input.trim(),
       departmentId: null,
       medium: "",
-      page: 1
+      page: 1,
+      excludeRestricted: true
     };
   }
 
@@ -40,7 +55,8 @@ function normalizeSearchState(input) {
     departmentId:
       input?.departmentId == null ? null : normalizePositiveInteger(input.departmentId, null),
     medium: input?.medium?.trim() ?? "",
-    page: normalizePositiveInteger(input?.page)
+    page: normalizePositiveInteger(input?.page),
+    excludeRestricted: normalizeExcludeRestricted(input?.excludeRestricted)
   };
 }
 
@@ -71,7 +87,8 @@ function normalizeSearchResult(record) {
     department: record.department ?? "",
     imageUrl,
     isPublicDomain: Boolean(record.isPublicDomain),
-    hasImage: Boolean(imageUrl)
+    hasImage: Boolean(imageUrl),
+    hydrationStatus: String(record.hydrationStatus ?? "").trim()
   };
 }
 
@@ -157,9 +174,10 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
           normalizedSearchState.departmentId == null ||
           record.departmentId === normalizedSearchState.departmentId;
 
-        return (
+      return (
           haystack.includes(query) &&
           matchesDepartment &&
+          (!normalizedSearchState.excludeRestricted || record.isPublicDomain !== false) &&
           matchesCuratedMedium(record, normalizedSearchState.medium)
         );
       });
@@ -167,6 +185,7 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
 
       return {
         query: normalizedSearchState.query,
+        totalResults: filteredRecords.length,
         results: filteredRecords.slice(pageStart, pageStart + searchPageSize).map(normalizeSearchResult)
       };
     },

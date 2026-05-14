@@ -2660,37 +2660,27 @@ test("submitting search with Department and Medium filters preserves the search 
     query: "landscape",
     departmentId: 11,
     medium: "wood",
-    page: 1
+    page: 1,
+    excludeRestricted: true
   });
 });
 
-test("search results support explicit next-page navigation", async () => {
+test("search pagination next shifts to the next 10-page window", async () => {
   const metClient = {
     async getDepartments() {
       return { departments: [] };
     },
 
     async searchCollection(searchState) {
-      if (searchState.page === 2) {
-        return {
-          query: searchState.query,
-          results: [
-            {
-              objectId: 13,
-              title: "Work 13",
-              artist: "Artist 13",
-              date: "1900"
-            }
-          ]
-        };
-      }
+      const startId = (searchState.page - 1) * 12 + 1;
 
       return {
         query: searchState.query,
+        totalResults: 1200,
         results: Array.from({ length: 12 }, (_, index) => ({
-          objectId: index + 1,
-          title: `Work ${index + 1}`,
-          artist: `Artist ${index + 1}`,
+          objectId: startId + index,
+          title: `Work ${startId + index}`,
+          artist: `Artist ${startId + index}`,
           date: "1900"
         }))
       };
@@ -2703,11 +2693,11 @@ test("search results support explicit next-page navigation", async () => {
   expect(await screen.findByRole("link", { name: "Work 1" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Next page" }));
 
-  expect(await screen.findByRole("link", { name: "Work 13" })).toHaveAttribute(
+  expect(await screen.findByRole("link", { name: "Work 121" })).toHaveAttribute(
     "href",
-    "/works/13"
+    "/works/121"
   );
-  expect(window.location.search).toBe("?q=landscape&page=2");
+  expect(window.location.search).toBe("?q=landscape&page=11");
 });
 
 test("search pagination renders as text actions while preserving page navigation", async () => {
@@ -2720,6 +2710,7 @@ test("search pagination renders as text actions while preserving page navigation
       if (searchState.page === 2) {
         return {
           query: searchState.query,
+          totalResults: 13,
           results: [
             {
               objectId: 13,
@@ -2733,6 +2724,7 @@ test("search pagination renders as text actions while preserving page navigation
 
       return {
         query: searchState.query,
+        totalResults: 13,
         results: Array.from({ length: 12 }, (_, index) => ({
           objectId: index + 1,
           title: `Work ${index + 1}`,
@@ -2747,18 +2739,124 @@ test("search pagination renders as text actions while preserving page navigation
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
   const nextButton = await screen.findByRole("button", { name: "Next page" });
-  const pageLabel = screen.getByText("Page 1");
+  const currentPageButton = screen.getByRole("button", { name: "Page 1" });
+  const pagination = currentPageButton.closest(".search-pagination");
 
   expect(nextButton).toHaveTextContent("[next]");
   expect(nextButton).not.toHaveClass("bg-secondary");
   expect(nextButton).not.toHaveClass("border-input");
   expect(nextButton).not.toHaveClass("px-3");
-  expect(pageLabel).toHaveClass("text-muted-foreground");
+  expect(currentPageButton).toHaveClass("text-primary");
+  expect(pagination).toHaveClass("justify-center");
 
   fireEvent.click(nextButton);
 
-  expect(await screen.findByRole("link", { name: "Work 13" })).toHaveAttribute("href", "/works/13");
-  expect(window.location.search).toBe("?q=landscape&page=2");
+  expect(await screen.findByRole("button", { name: "Page 11" })).toBeInTheDocument();
+  expect(window.location.search).toBe("?q=landscape&page=11");
+});
+
+test("search pagination allows direct selection within the current 10-page window", async () => {
+  const metClient = {
+    async getDepartments() {
+      return { departments: [] };
+    },
+
+    async searchCollection(searchState) {
+      const startId = (searchState.page - 1) * 12 + 1;
+
+      return {
+        query: searchState.query,
+        totalResults: 120,
+        results: Array.from({ length: 12 }, (_, index) => ({
+          objectId: startId + index,
+          title: `Work ${startId + index}`,
+          artist: `Artist ${startId + index}`,
+          date: "1900"
+        }))
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=landscape");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("link", { name: "Work 1" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Page 10" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Page 11" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Page 5" }));
+
+  expect(await screen.findByRole("link", { name: "Work 49" })).toHaveAttribute("href", "/works/49");
+  expect(window.location.search).toBe("?q=landscape&page=5");
+});
+
+test("search pagination shifts to the next 10-page window for large result sets", async () => {
+  const metClient = {
+    async getDepartments() {
+      return { departments: [] };
+    },
+
+    async searchCollection(searchState) {
+      const startId = (searchState.page - 1) * 12 + 1;
+
+      return {
+        query: searchState.query,
+        totalResults: 1200,
+        results: Array.from({ length: 12 }, (_, index) => ({
+          objectId: startId + index,
+          title: `Work ${startId + index}`,
+          artist: `Artist ${startId + index}`,
+          date: "1900"
+        }))
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=landscape&page=11");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("link", { name: "Work 121" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Page 11" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("button", { name: "Page 20" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Page 10" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Next page window" }));
+
+  expect(await screen.findByRole("button", { name: "Page 21" })).toBeInTheDocument();
+  expect(window.location.search).toBe("?q=landscape&page=21");
+});
+
+test("search pagination prev shifts to the previous 10-page window", async () => {
+  const metClient = {
+    async getDepartments() {
+      return { departments: [] };
+    },
+
+    async searchCollection(searchState) {
+      const startId = (searchState.page - 1) * 12 + 1;
+
+      return {
+        query: searchState.query,
+        totalResults: 1200,
+        results: Array.from({ length: 12 }, (_, index) => ({
+          objectId: startId + index,
+          title: `Work ${startId + index}`,
+          artist: `Artist ${startId + index}`,
+          date: "1900"
+        }))
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=landscape&page=11");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  expect(await screen.findByRole("button", { name: "Page 11" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Prev page window" }));
+
+  expect(await screen.findByRole("button", { name: "Page 1" })).toBeInTheDocument();
+  expect(window.location.search).toBe("?q=landscape");
 });
 
 test("submitting a valid query fetches search results through Express and renders work links", async () => {
@@ -2767,6 +2865,7 @@ test("submitting a valid query fetches search results through Express and render
     async searchCollection(query) {
       return {
         query,
+        totalResults: 1,
         results: [
           {
             objectId: 436524,
@@ -2795,6 +2894,7 @@ test("submitting a valid query fetches search results through Express and render
     "href",
     "/works/436524"
   );
+  expect(screen.getByText(/1 result · in (\d+ ms|\d+\.\d s) · Page 1/)).toBeInTheDocument();
   expect(window.location.search).toBe("?q=sunflowers");
   expect(requests).toContain("/api/search?q=sunflowers");
 });
@@ -2823,6 +2923,7 @@ test("loading a populated search URL restores the same search state end to end",
 
       return {
         query: searchState.query,
+        totalResults: 1,
         results: [
           {
             objectId: 437329,
@@ -2852,11 +2953,102 @@ test("loading a populated search URL restores the same search state end to end",
     query: "harvesters",
     departmentId: 11,
     medium: "paintings",
-    page: 2
+    page: 2,
+    excludeRestricted: true
   });
 });
 
-test("search results show inline availability markers for rights and image status", async () => {
+test("search route hides restricted works by default and can restore a show-restricted override", async () => {
+  const requests = [];
+  let receivedSearchState = null;
+  const metClient = {
+    async searchCollection(searchState) {
+      receivedSearchState = searchState;
+
+      return {
+        query: searchState.query,
+        totalResults: 1,
+        results: [
+          {
+            objectId: 486055,
+            title: "Galisteo Creek",
+            artist: "Susan Rothenberg",
+            date: "1992",
+            imageUrl: "",
+            isPublicDomain: false,
+            hasImage: false,
+            hydrationStatus: "no_image"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search?q=rothenberg&excludeRestricted=false");
+  render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
+
+  expect(await screen.findByRole("link", { name: "Galisteo Creek" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[hide restricted]" })).toBeInTheDocument();
+  expect(requests).toContain("/api/search?q=rothenberg&excludeRestricted=false");
+  expect(receivedSearchState).toEqual({
+    query: "rothenberg",
+    departmentId: null,
+    medium: "",
+    page: 1,
+    excludeRestricted: false
+  });
+});
+
+test("search route can submit a show-restricted override from the filter strip", async () => {
+  let receivedSearchState = null;
+  const metClient = {
+    async searchCollection(searchState) {
+      receivedSearchState = searchState;
+
+      return {
+        query: searchState.query,
+        totalResults: 1,
+        results: [
+          {
+            objectId: 486055,
+            title: "Galisteo Creek",
+            artist: "Susan Rothenberg",
+            date: "1992",
+            imageUrl: "",
+            isPublicDomain: false,
+            hasImage: false,
+            hydrationStatus: "no_image"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const queryInput = await screen.findByLabelText("Query");
+  fireEvent.change(queryInput, {
+    target: { value: "rothenberg" }
+  });
+  await waitFor(() => {
+    expect(queryInput).toHaveValue("rothenberg");
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[show restricted]" }));
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  expect(await screen.findByRole("link", { name: "Galisteo Creek" })).toBeInTheDocument();
+  expect(window.location.search).toBe("?q=rothenberg&excludeRestricted=false");
+  expect(receivedSearchState).toEqual({
+    query: "rothenberg",
+    departmentId: null,
+    medium: "",
+    page: 1,
+    excludeRestricted: false
+  });
+});
+
+test("search results show inline availability markers for rights and hydrated no-image status", async () => {
   const metClient = {
     async searchCollection(query) {
       return {
@@ -2880,7 +3072,19 @@ test("search results show inline availability markers for rights and image statu
             department: "Modern and Contemporary Art",
             imageUrl: "",
             isPublicDomain: false,
-            hasImage: false
+            hasImage: false,
+            hydrationStatus: "no_image"
+          },
+          {
+            objectId: 123456,
+            title: "Pending Hydration Work",
+            artist: "Unknown Artist",
+            date: "1900",
+            department: "Drawings and Prints",
+            imageUrl: "",
+            isPublicDomain: true,
+            hasImage: false,
+            hydrationStatus: "pending"
           }
         ]
       };
@@ -2892,10 +3096,12 @@ test("search results show inline availability markers for rights and image statu
 
   expect(await screen.findByRole("link", { name: "Sunflowers" })).toBeInTheDocument();
   expect(await screen.findByRole("link", { name: "Galisteo Creek" })).toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "Pending Hydration Work" })).toBeInTheDocument();
   expect(screen.getByText(/Vincent van Gogh .* European Paintings/i)).toBeInTheDocument();
   expect(screen.getByText(/Susan Rothenberg .* Modern and Contemporary Art/i)).toBeInTheDocument();
   expect(screen.getByText("Rights Restricted")).toBeInTheDocument();
   expect(screen.getByText("No Image Available")).toBeInTheDocument();
+  expect(screen.getAllByText("No Image Available")).toHaveLength(1);
 });
 
 test("search results render as a themed list while preserving result-link behavior", async () => {
@@ -2911,7 +3117,8 @@ test("search results render as a themed list while preserving result-link behavi
             date: "1992",
             imageUrl: "",
             isPublicDomain: false,
-            hasImage: false
+            hasImage: false,
+            hydrationStatus: "no_image"
           }
         ]
       };

@@ -28,6 +28,16 @@ function normalizePositiveInteger(value, defaultValue = 1) {
   return Number.isNaN(parsedValue) || parsedValue < 1 ? defaultValue : parsedValue;
 }
 
+function normalizeExcludeRestricted(value) {
+  const normalizedValue = String(value ?? "").trim().toLowerCase();
+
+  if (["false", "0", "off", "no"].includes(normalizedValue)) {
+    return false;
+  }
+
+  return true;
+}
+
 function normalizeCuratedGroupSlug(value) {
   const normalizedGroupSlug = String(value ?? "").trim();
   return normalizedGroupSlug || "homepage";
@@ -399,6 +409,7 @@ export function createArtctlApp(options = {}) {
     const departmentId = request.query.departmentId?.trim();
     const medium = request.query.medium?.trim() ?? "";
     const page = normalizePositiveInteger(request.query.page);
+    const excludeRestricted = normalizeExcludeRestricted(request.query.excludeRestricted);
 
     if (!query) {
       response.status(400).json({
@@ -412,7 +423,8 @@ export function createArtctlApp(options = {}) {
         query,
         departmentId: departmentId ? normalizePositiveInteger(departmentId, null) : null,
         medium,
-        page
+        page,
+        excludeRestricted
       });
       response.json(results);
       return;
@@ -423,7 +435,8 @@ export function createArtctlApp(options = {}) {
         query,
         departmentId: departmentId ? normalizePositiveInteger(departmentId, null) : null,
         medium,
-        page
+        page,
+        excludeRestricted
       });
       response.json(results);
     } catch (error) {

@@ -114,12 +114,27 @@ function normalizePositiveInteger(value, defaultValue = 1) {
 }
 
 function normalizeSearchState(input) {
+  function normalizeExcludeRestricted(value) {
+    if (typeof value === "boolean") {
+      return value;
+    }
+
+    const normalizedValue = String(value ?? "").trim().toLowerCase();
+
+    if (["false", "0", "off", "no"].includes(normalizedValue)) {
+      return false;
+    }
+
+    return true;
+  }
+
   if (typeof input === "string") {
     return {
       query: input.trim(),
       departmentId: null,
       medium: "",
-      page: 1
+      page: 1,
+      excludeRestricted: true
     };
   }
 
@@ -128,7 +143,8 @@ function normalizeSearchState(input) {
     departmentId:
       input?.departmentId == null ? null : normalizePositiveInteger(input.departmentId, null),
     medium: input?.medium?.trim() ?? "",
-    page: normalizePositiveInteger(input?.page)
+    page: normalizePositiveInteger(input?.page),
+    excludeRestricted: normalizeExcludeRestricted(input?.excludeRestricted)
   };
 }
 
@@ -137,7 +153,8 @@ function buildSearchCacheKey(searchState) {
     searchState.query,
     searchState.departmentId,
     searchState.medium,
-    searchState.page
+    searchState.page,
+    searchState.excludeRestricted
   ]);
 }
 
@@ -426,14 +443,15 @@ export function createMetApiClient({
       const lastResultIndex = firstResultIndex + searchPageSize;
 
       if (objectIds.length === 0) {
-        return { query, results: [] };
+        return { query, totalResults: 0, results: [] };
       }
 
-      const matchingObjects = [];
+      const pageResults = [];
+      let totalResults = 0;
 
       for (
         let index = 0;
-        index < objectIds.length && matchingObjects.length < lastResultIndex;
+        index < objectIds.length;
         index += searchPageSize
       ) {
         const objectPayloads = await Promise.all(
@@ -442,18 +460,26 @@ export function createMetApiClient({
             .map((objectId) => fetchObject(objectId, { optional: true }))
         );
 
-        matchingObjects.push(
-          ...objectPayloads
-            .filter((object) => object?.objectID && object?.title)
-            .filter((object) => matchesCuratedMedium(object, medium))
-        );
+        const matchingBatch = objectPayloads
+          .filter((object) => object?.objectID && object?.title)
+          .filter(
+            (object) => !searchState.excludeRestricted || object.isPublicDomain !== false
+          )
+          .filter((object) => matchesCuratedMedium(object, medium));
+
+        for (const object of matchingBatch) {
+          if (totalResults >= firstResultIndex && pageResults.length < searchPageSize) {
+            pageResults.push(object);
+          }
+
+          totalResults += 1;
+        }
       }
 
       const result = {
         query,
-        results: matchingObjects
-          .slice(firstResultIndex, lastResultIndex)
-          .map(normalizeSearchResult)
+        totalResults,
+        results: pageResults.map(normalizeSearchResult)
       };
 
       setCachedValue(searchCache, cacheKey, result);
