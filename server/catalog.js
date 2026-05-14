@@ -78,6 +78,7 @@ function deriveCuratedGroupSlug(name) {
 
 function normalizeSearchResult(record) {
   const imageUrl = record.primaryImageSmall || record.primaryImage || "";
+  const hydrationStatus = String(record.hydrationStatus ?? "").trim();
 
   return {
     objectId: record.objectID,
@@ -88,7 +89,7 @@ function normalizeSearchResult(record) {
     imageUrl,
     isPublicDomain: Boolean(record.isPublicDomain),
     hasImage: Boolean(imageUrl),
-    hydrationStatus: String(record.hydrationStatus ?? "").trim()
+    ...(hydrationStatus && hydrationStatus !== "pending" ? { hydrationStatus } : {})
   };
 }
 

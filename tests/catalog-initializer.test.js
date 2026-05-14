@@ -33,6 +33,7 @@ describe("runtime catalog initializer", () => {
     expect(catalog.isReady()).toBe(true);
     await expect(catalog.searchCollection({ query: "sunflowers" })).resolves.toEqual({
       query: "sunflowers",
+      totalResults: 1,
       results: [
         {
           objectId: 436524,

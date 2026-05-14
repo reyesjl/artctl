@@ -531,10 +531,14 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             <div className="search-pagination mt-4 flex flex-wrap items-center justify-center gap-3">
               {hasPreviousWindow ? (
                 <button
-                  aria-label="Prev page window"
+                  aria-label="Prev page"
                   className="text-action"
                   type="button"
-                  onClick={() => handlePageChange(paginationWindow.windowStart - 1)}
+                  onClick={() =>
+                    handlePageChange(
+                      Math.max(1, paginationWindow.windowStart - PAGINATION_WINDOW_SIZE)
+                    )
+                  }
                 >
                   [prev]
                 </button>
@@ -553,7 +557,7 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
               ))}
               {hasNextWindow ? (
                 <button
-                  aria-label="Next page window"
+                  aria-label="Next page"
                   className="text-action"
                   type="button"
                   onClick={() => handlePageChange(paginationWindow.windowEnd + 1)}

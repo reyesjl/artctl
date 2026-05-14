@@ -55,6 +55,7 @@ describe("dev server startup", () => {
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
       query: "shipwreck",
+      totalResults: 1,
       results: [
         {
           objectId: 5046,
@@ -114,6 +115,7 @@ describe("dev server startup", () => {
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
       query: "shipwreck",
+      totalResults: 1,
       results: [
         {
           objectId: 5046,

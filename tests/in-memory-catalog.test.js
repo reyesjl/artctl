@@ -220,8 +220,7 @@ describe("in-memory catalog", () => {
           department: "",
           imageUrl: "https://images.metmuseum.org/CRDImages/ep/web-large/DT1567.jpg",
           isPublicDomain: true,
-          hasImage: true,
-          hydrationStatus: ""
+          hasImage: true
         },
         {
           objectId: 486055,

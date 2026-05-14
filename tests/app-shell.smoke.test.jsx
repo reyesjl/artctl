@@ -305,7 +305,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("ARTCTL v1.6").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.7").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -1512,7 +1512,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("ARTCTL v1.6")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.7")).toBeInTheDocument();
 });
 
 test("search route reveals terminal-style department and media pickers from the action strip", async () => {
@@ -2707,28 +2707,13 @@ test("search pagination renders as text actions while preserving page navigation
     },
 
     async searchCollection(searchState) {
-      if (searchState.page === 2) {
-        return {
-          query: searchState.query,
-          totalResults: 13,
-          results: [
-            {
-              objectId: 13,
-              title: "Work 13",
-              artist: "Artist 13",
-              date: "1900"
-            }
-          ]
-        };
-      }
-
       return {
         query: searchState.query,
         totalResults: 13,
-        results: Array.from({ length: 12 }, (_, index) => ({
-          objectId: index + 1,
-          title: `Work ${index + 1}`,
-          artist: `Artist ${index + 1}`,
+        results: Array.from({ length: searchState.page === 2 ? 1 : 12 }, (_, index) => ({
+          objectId: (searchState.page - 1) * 12 + index + 1,
+          title: `Work ${(searchState.page - 1) * 12 + index + 1}`,
+          artist: `Artist ${(searchState.page - 1) * 12 + index + 1}`,
           date: "1900"
         }))
       };
@@ -2738,21 +2723,18 @@ test("search pagination renders as text actions while preserving page navigation
   window.history.pushState({}, "", "/search?q=landscape");
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
-  const nextButton = await screen.findByRole("button", { name: "Next page" });
-  const currentPageButton = screen.getByRole("button", { name: "Page 1" });
+  const currentPageButton = await screen.findByRole("button", { name: "Page 1" });
   const pagination = currentPageButton.closest(".search-pagination");
 
-  expect(nextButton).toHaveTextContent("[next]");
-  expect(nextButton).not.toHaveClass("bg-secondary");
-  expect(nextButton).not.toHaveClass("border-input");
-  expect(nextButton).not.toHaveClass("px-3");
   expect(currentPageButton).toHaveClass("text-primary");
   expect(pagination).toHaveClass("justify-center");
+  expect(screen.getByRole("button", { name: "Page 2" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Next page" })).not.toBeInTheDocument();
 
-  fireEvent.click(nextButton);
+  fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
 
-  expect(await screen.findByRole("button", { name: "Page 11" })).toBeInTheDocument();
-  expect(window.location.search).toBe("?q=landscape&page=11");
+  expect(await screen.findByRole("link", { name: "Work 13" })).toHaveAttribute("href", "/works/13");
+  expect(window.location.search).toBe("?q=landscape&page=2");
 });
 
 test("search pagination allows direct selection within the current 10-page window", async () => {
@@ -2820,7 +2802,7 @@ test("search pagination shifts to the next 10-page window for large result sets"
   expect(screen.getByRole("button", { name: "Page 20" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Page 10" })).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Next page window" }));
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
 
   expect(await screen.findByRole("button", { name: "Page 21" })).toBeInTheDocument();
   expect(window.location.search).toBe("?q=landscape&page=21");
@@ -2853,7 +2835,7 @@ test("search pagination prev shifts to the previous 10-page window", async () =>
 
   expect(await screen.findByRole("button", { name: "Page 11" })).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Prev page window" }));
+  fireEvent.click(screen.getByRole("button", { name: "Prev page" }));
 
   expect(await screen.findByRole("button", { name: "Page 1" })).toBeInTheDocument();
   expect(window.location.search).toBe("?q=landscape");
@@ -4660,7 +4642,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("ARTCTL v1.6")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.7")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 

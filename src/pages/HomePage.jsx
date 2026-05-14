@@ -49,7 +49,13 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [emptyState, setEmptyState] = useState(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("loading");
-  const [isPrintSupportNoticeVisible, setIsPrintSupportNoticeVisible] = useState(true);
+  const [isPrintSupportNoticeVisible, setIsPrintSupportNoticeVisible] = useState(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+
+    return window.sessionStorage.getItem(printSupportNoticeSessionStorageKey) !== "true";
+  });
   const [isTaskNoticeVisible, setIsTaskNoticeVisible] = useState(true);
   const [isSuggestionModalOpen, setIsSuggestionModalOpen] = useState(false);
   const [suggestionArtist, setSuggestionArtist] = useState("");

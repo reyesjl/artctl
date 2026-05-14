@@ -313,6 +313,7 @@ describe("configured SQLite catalog runtime", () => {
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response._getData())).toEqual({
       query: "shipwreck",
+      totalResults: 1,
       results: [
         {
           objectId: 5046,
