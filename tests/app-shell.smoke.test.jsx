@@ -3129,7 +3129,7 @@ test("work viewer can request and render ai info for an art student", async () =
   expect(studyOverlay).toHaveClass("border-border");
   expect(studyOverlay).toHaveClass("overflow-y-auto");
   expect(studyOverlay).toHaveClass("max-h-[55%]");
-  const overlayHeader = screen.getByText("Machine observation is not connoisseurship.").parentElement;
+  const overlayHeader = screen.getByText("Machine observation is not connoisseurship.").parentElement.parentElement.parentElement;
   const learnMoreLink = screen.getByRole("link", { name: "[learn more]" });
 
   expect(overlayHeader).toHaveClass("sticky");
