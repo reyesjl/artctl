@@ -43,6 +43,32 @@ function normalizeCuratedGroupSlug(value) {
   return normalizedGroupSlug || "homepage";
 }
 
+function normalizeProxyImageUrl(value) {
+  const rawUrl = String(value ?? "").trim();
+
+  if (!rawUrl) {
+    return { error: "Image URL is required." };
+  }
+
+  let parsedUrl;
+
+  try {
+    parsedUrl = new URL(rawUrl);
+  } catch {
+    return { error: "Image URL must be valid." };
+  }
+
+  if (parsedUrl.protocol !== "https:") {
+    return { error: "Image URL must use HTTPS." };
+  }
+
+  if (!["images.metmuseum.org", "collectionapi.metmuseum.org"].includes(parsedUrl.hostname)) {
+    return { error: "Image URL host is not allowed." };
+  }
+
+  return { url: parsedUrl.toString() };
+}
+
 function buildMetErrorBody(metClient, errorMessage) {
   const cooldownStatus = metClient.getCooldownStatus?.();
 
@@ -481,6 +507,51 @@ export function createArtctlApp(options = {}) {
       response.status(502).json(
         buildMetErrorBody(metClient, "The Met gallery is temporarily unavailable. Please try again.")
       );
+    }
+  });
+
+  app.get("/api/image-proxy", async (request, response) => {
+    const normalizedImageUrl = normalizeProxyImageUrl(request.query.url);
+
+    if (normalizedImageUrl.error) {
+      response.status(400).json({
+        error: normalizedImageUrl.error
+      });
+      return;
+    }
+
+    try {
+      const upstreamResponse = await hydrationFetchImpl(normalizedImageUrl.url);
+
+      if (!upstreamResponse.ok) {
+        response.status(502).json({
+          error: "Unable to load proxied image."
+        });
+        return;
+      }
+
+      const contentType = upstreamResponse.headers?.get?.("content-type") ?? "application/octet-stream";
+
+      if (!contentType.startsWith("image/")) {
+        response.status(502).json({
+          error: "Proxied response was not an image."
+        });
+        return;
+      }
+
+      const contentLength = upstreamResponse.headers?.get?.("content-length");
+      if (contentLength) {
+        response.setHeader("Content-Length", contentLength);
+      }
+      response.setHeader("Content-Type", contentType);
+      response.setHeader("Cache-Control", "public, max-age=86400");
+
+      const arrayBuffer = await upstreamResponse.arrayBuffer();
+      response.send(Buffer.from(arrayBuffer));
+    } catch {
+      response.status(502).json({
+        error: "Unable to load proxied image."
+      });
     }
   });
 

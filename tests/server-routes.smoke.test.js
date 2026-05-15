@@ -107,6 +107,40 @@ function createTextResponse(
   };
 }
 
+function createBinaryResponse(
+  body,
+  { status = 200, contentType = "image/jpeg", contentLength = null, setCookies = [] } = {}
+) {
+  const buffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
+
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get(name) {
+        const normalizedName = name.toLowerCase();
+
+        if (normalizedName === "content-type") {
+          return contentType;
+        }
+
+        if (normalizedName === "content-length") {
+          return String(contentLength ?? buffer.length);
+        }
+
+        return null;
+      },
+      getSetCookie() {
+        return setCookies;
+      }
+    },
+    body: null,
+    async arrayBuffer() {
+      return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    }
+  };
+}
+
 describe("SPA route refresh", () => {
   test.each(["/", "/search", "/works/42", "/help", "/theme"])(
     "GET %s returns the ARTCTL shell",
@@ -117,6 +151,44 @@ describe("SPA route refresh", () => {
       expect(response._getData()).toContain('<div id="root"></div>');
     }
   );
+});
+
+describe("image proxy route", () => {
+  test("GET /api/image-proxy streams allowlisted image responses", async () => {
+    const imageBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+    const hydrationFetchImpl = vi.fn(async (url) => {
+      expect(url).toBe("https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg");
+      return createBinaryResponse(imageBuffer, {
+        contentType: "image/jpeg"
+      });
+    });
+    const proxyApp = createArtctlApp({
+      hydrationFetchImpl,
+      allowLegacyMetRuntime: true
+    });
+
+    const response = await makeRequest(
+      `/api/image-proxy?url=${encodeURIComponent("https://images.metmuseum.org/CRDImages/as/web-large/DP130155.jpg")}`,
+      proxyApp
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.getHeader("Content-Type")).toBe("image/jpeg");
+    expect(response._getData()).toEqual(imageBuffer);
+    expect(hydrationFetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test("GET /api/image-proxy rejects non-Met hosts", async () => {
+    const response = await makeRequest(
+      `/api/image-proxy?url=${encodeURIComponent("https://example.com/not-allowed.jpg")}`,
+      createArtctlApp({ allowLegacyMetRuntime: true })
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Image URL host is not allowed."
+    });
+  });
 });
 
 describe("configured SQLite catalog runtime", () => {

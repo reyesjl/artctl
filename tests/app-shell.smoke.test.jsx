@@ -3910,7 +3910,7 @@ test("desktop wheel zoom anchors to the pointer location instead of the image ce
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
   const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
-  const stage = image.parentElement;
+  const stage = image.closest(".work-image-stage");
 
   stage.getBoundingClientRect = () => ({
     width: 400,

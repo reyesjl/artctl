@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, ImagePlus, Share2 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ProgressiveArtworkImage } from "../components/ProgressiveArtworkImage.jsx";
+import { buildArtworkProxyUrl } from "../lib/artwork-image-proxy.js";
 import { RouteFrame } from "../components/RouteFrame.jsx";
 import { shareCurrentPage } from "../lib/share.js";
 
@@ -10,7 +12,7 @@ function isArtistSummary(item) {
   return typeof item?.artistSlug === "string";
 }
 
-function GalleryCard({ item }) {
+function GalleryCard({ item, apiBaseUrl }) {
   const [imageFailed, setImageFailed] = useState(false);
   const title = isArtistSummary(item) ? item.artist : item.title;
   const meta = isArtistSummary(item) ? `${item.workCount} works` : item.artist;
@@ -25,10 +27,14 @@ function GalleryCard({ item }) {
       <Link className="block h-full" to={href}>
         <figure className="gallery-card-media m-0 bg-secondary">
           {item.imageUrl && !imageFailed ? (
-            <img
+            <ProgressiveArtworkImage
               className="gallery-card-image block aspect-[4/3] w-full object-cover"
               src={item.imageUrl}
+              processingSrc={buildArtworkProxyUrl(item.imageUrl, { apiBaseUrl })}
               alt={title}
+              sequenceProfile="gallery"
+              startWhenVisible
+              loading="lazy"
               onError={() => setImageFailed(true)}
             />
           ) : (
@@ -324,7 +330,11 @@ export function HomePage({ apiBaseUrl = "", fetchImpl = fetch }) {
             hidden={results.length === 0}
           >
             {results.map((item) => (
-              <GalleryCard key={isArtistSummary(item) ? item.artistSlug : item.objectId} item={item} />
+              <GalleryCard
+                key={isArtistSummary(item) ? item.artistSlug : item.objectId}
+                item={item}
+                apiBaseUrl={apiBaseUrl}
+              />
             ))}
           </ul>
           {isTaskNoticeVisible ? (

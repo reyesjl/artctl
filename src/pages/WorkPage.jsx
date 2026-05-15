@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Info, MessageSquareWarning, Receipt, Share2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 import { BrailleNoiseStream } from "../components/BrailleNoiseStream.jsx";
+import { ProgressiveArtworkImage } from "../components/ProgressiveArtworkImage.jsx";
+import { buildArtworkProxyUrl } from "../lib/artwork-image-proxy.js";
 import { RouteFrame } from "../components/RouteFrame.jsx";
 import { shareCurrentPage } from "../lib/share.js";
 
@@ -123,6 +125,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   const [isPrintModalVisible, setIsPrintModalVisible] = useState(false);
   const [isMobileDetailsExpanded, setIsMobileDetailsExpanded] = useState(false);
   const [isDesktopViewerHovered, setIsDesktopViewerHovered] = useState(false);
+  const [imageRecoveryPhase, setImageRecoveryPhase] = useState("idle");
   const [scale, setScale] = useState(MIN_SCALE);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [activeMode, setActiveMode] = useState("original");
@@ -182,13 +185,20 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
     setIsPrintModalVisible(false);
     setIsMobileDetailsExpanded(false);
     setIsDesktopViewerHovered(false);
+    setImageRecoveryPhase("idle");
     dragStateRef.current = null;
     lastTapAtRef.current = 0;
     studySheetTouchRef.current = null;
   }, [objectId]);
 
+  const isImageRecoveryBlockingInteraction =
+    imageRecoveryPhase === "stage-1" ||
+    imageRecoveryPhase === "stage-2" ||
+    imageRecoveryPhase === "stage-3" ||
+    imageRecoveryPhase === "stage-4";
+
   useEffect(() => {
-    if (!work?.imageUrl) {
+    if (!work?.imageUrl || isImageRecoveryBlockingInteraction) {
       return undefined;
     }
 
@@ -217,10 +227,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [work?.imageUrl]);
+  }, [isImageRecoveryBlockingInteraction, work?.imageUrl]);
 
   useEffect(() => {
-    if (isMobileLayout || !work?.imageUrl || !figureRef.current) {
+    if (isMobileLayout || !work?.imageUrl || !figureRef.current || isImageRecoveryBlockingInteraction) {
       return undefined;
     }
 
@@ -246,9 +256,13 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
     return () => {
       figureElement.removeEventListener("wheel", handleWheel);
     };
-  }, [isMobileLayout, scale, pan, work?.imageUrl]);
+  }, [isImageRecoveryBlockingInteraction, isMobileLayout, scale, pan, work?.imageUrl]);
 
   function updateScale(nextScale, options = {}) {
+    if (isImageRecoveryBlockingInteraction) {
+      return;
+    }
+
     const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
 
     if (clampedScale === MIN_SCALE) {
@@ -311,11 +325,19 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   }
 
   function handleResetView() {
+    if (isImageRecoveryBlockingInteraction) {
+      return;
+    }
+
     updateScale(MIN_SCALE);
     setActiveMode("original");
   }
 
   function handleMouseDown(event) {
+    if (isImageRecoveryBlockingInteraction) {
+      return;
+    }
+
     if (scale === MIN_SCALE) {
       return;
     }
@@ -328,6 +350,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   }
 
   function handleMouseMove(event) {
+    if (isImageRecoveryBlockingInteraction) {
+      return;
+    }
+
     if (!dragStateRef.current || scale === MIN_SCALE) {
       return;
     }
@@ -357,6 +383,11 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   }
 
   function handleTouchStart(event) {
+    if (isImageRecoveryBlockingInteraction) {
+      dragStateRef.current = null;
+      return;
+    }
+
     if (isMobileLayout) {
       dragStateRef.current = null;
       return;
@@ -388,6 +419,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   }
 
   function handleTouchMove(event) {
+    if (isImageRecoveryBlockingInteraction) {
+      return;
+    }
+
     if (isMobileLayout) {
       return;
     }
@@ -434,6 +469,11 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   }
 
   function handleTouchEnd(event) {
+    if (isImageRecoveryBlockingInteraction) {
+      dragStateRef.current = null;
+      return;
+    }
+
     if (isMobileLayout) {
       dragStateRef.current = null;
       return;
@@ -462,6 +502,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   }
 
   function handleModeChange(nextMode) {
+    if (isImageRecoveryBlockingInteraction) {
+      return;
+    }
+
     if (!VIEWER_MODES.includes(nextMode)) {
       return;
     }
@@ -470,6 +514,10 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
   }
 
   function handleCycleMode() {
+    if (isImageRecoveryBlockingInteraction) {
+      return;
+    }
+
     setActiveMode((currentMode) => getNextMode(currentMode));
   }
 
@@ -822,12 +870,15 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
                     </figcaption>
                   ) : null}
                   <div ref={imageStageRef} className="work-image-stage min-h-[320px] overflow-hidden">
-                    <img
-                      key={activeMode}
+                    <ProgressiveArtworkImage
+                      key={work.imageUrl}
                       ref={imageRef}
                       className="work-image block h-auto w-full select-none"
                       src={work.imageUrl}
+                      processingSrc={buildArtworkProxyUrl(work.imageUrl, { apiBaseUrl })}
                       alt={displayedTitle}
+                      sequenceProfile="work"
+                      onReconstructionStateChange={setImageRecoveryPhase}
                       draggable="false"
                       onMouseDown={handleMouseDown}
                       onMouseMove={handleMouseMove}
