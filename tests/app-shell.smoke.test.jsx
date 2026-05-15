@@ -397,7 +397,7 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("ARTCTL v1.10").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.11").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -1607,7 +1607,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("ARTCTL v1.10")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.11")).toBeInTheDocument();
 });
 
 test("search route reveals inline filter controls from the filter toggle", async () => {
@@ -2556,6 +2556,143 @@ test("search route shows an empty state before any query is submitted", async ()
   await waitFor(() => {
     expect(requests).toEqual(["/api/app-shell", "/api/admin/session", "/api/search/departments"]);
   });
+});
+
+test("admin can curate a random group from the full loaded search subset", async () => {
+  const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+  const promptSpy = vi.spyOn(window, "prompt").mockReturnValue("Evening Landscapes");
+  const requests = [];
+  const records = Array.from({ length: 30 }, (_, index) => {
+    const objectId = index + 1;
+
+    return {
+      objectID: objectId,
+      title: `Landscape Study ${objectId}`,
+      artistDisplayName: `Artist ${objectId}`,
+      culture: "",
+      objectDate: "1900",
+      department: "European Paintings",
+      departmentId: 11,
+      medium: "Oil on canvas",
+      objectName: "Painting",
+      primaryImage: `https://images.metmuseum.org/CRDImages/ep/original/${objectId}.jpg`,
+      primaryImageSmall: `https://images.metmuseum.org/CRDImages/ep/web-large/${objectId}.jpg`,
+      hydrationStatus: "hydrated",
+      isPublicDomain: true,
+      objectURL: `https://www.metmuseum.org/art/collection/search/${objectId}`
+    };
+  });
+
+  window.history.pushState({}, "", "/search");
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        requestLog: requests,
+        catalog: createRuntimeCatalog({ records }),
+        autoAuthenticateAdmin: true
+      })}
+    />
+  );
+
+  const queryInput = await screen.findByLabelText("Query");
+  fireEvent.change(queryInput, {
+    target: { value: "Landscape" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  expect(await screen.findByText(/30 results/)).toBeInTheDocument();
+
+  const curateSearchButton = screen.getByRole("button", { name: "[curate search]" });
+  fireEvent.click(curateSearchButton);
+
+  expect(promptSpy).toHaveBeenCalledWith("Name this curated group:", "Landscape");
+  expect(await screen.findByRole("heading", { name: "Evening Landscapes" })).toBeInTheDocument();
+  expect(window.location.pathname).toBe("/admin/curated-groups/evening-landscapes");
+  expect(screen.getAllByRole("button", { name: /Remove Landscape Study/ })).toHaveLength(16);
+  expect(requests).toContain("POST /api/admin/curated-groups/from-search");
+  promptSpy.mockRestore();
+  randomSpy.mockRestore();
+});
+
+test("search route hides the curate-search action for non-admin users", async () => {
+  const records = [
+    {
+      objectID: 1,
+      title: "Landscape Study 1",
+      artistDisplayName: "Artist 1",
+      culture: "",
+      objectDate: "1900",
+      department: "European Paintings",
+      departmentId: 11,
+      medium: "Oil on canvas",
+      objectName: "Painting",
+      primaryImage: "https://images.metmuseum.org/CRDImages/ep/original/1.jpg",
+      primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/1.jpg",
+      hydrationStatus: "hydrated",
+      isPublicDomain: true,
+      objectURL: "https://www.metmuseum.org/art/collection/search/1"
+    }
+  ];
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ catalog: createRuntimeCatalog({ records }) })} />);
+
+  const queryInput = await screen.findByLabelText("Query");
+  fireEvent.change(queryInput, {
+    target: { value: "Landscape" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  expect(await screen.findByText(/1 result/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "[curate search]" })).not.toBeInTheDocument();
+});
+
+test("admin canceling curate-search naming leaves the search page unchanged", async () => {
+  const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
+  const requests = [];
+  const records = [
+    {
+      objectID: 1,
+      title: "Landscape Study 1",
+      artistDisplayName: "Artist 1",
+      culture: "",
+      objectDate: "1900",
+      department: "European Paintings",
+      departmentId: 11,
+      medium: "Oil on canvas",
+      objectName: "Painting",
+      primaryImage: "https://images.metmuseum.org/CRDImages/ep/original/1.jpg",
+      primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/1.jpg",
+      hydrationStatus: "hydrated",
+      isPublicDomain: true,
+      objectURL: "https://www.metmuseum.org/art/collection/search/1"
+    }
+  ];
+
+  window.history.pushState({}, "", "/search");
+  render(
+    <App
+      fetchImpl={createFetchImpl({
+        requestLog: requests,
+        catalog: createRuntimeCatalog({ records }),
+        autoAuthenticateAdmin: true
+      })}
+    />
+  );
+
+  const queryInput = await screen.findByLabelText("Query");
+  fireEvent.change(queryInput, {
+    target: { value: "Landscape" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  expect(await screen.findByText(/1 result/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "[curate search]" }));
+
+  expect(promptSpy).toHaveBeenCalledWith("Name this curated group:", "Landscape");
+  expect(window.location.pathname).toBe("/search");
+  expect(requests).not.toContain("POST /api/admin/curated-groups/from-search");
+  promptSpy.mockRestore();
 });
 
 test("search route loads Department filter options from Express", async () => {
@@ -5251,7 +5388,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("ARTCTL v1.10")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.11")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 

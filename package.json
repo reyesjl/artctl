@@ -1,6 +1,6 @@
 {
   "name": "artctl",
-  "version": "1.10",
+  "version": "1.11",
   "private": true,
   "type": "module",
   "scripts": {

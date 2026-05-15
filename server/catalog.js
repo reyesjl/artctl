@@ -76,6 +76,19 @@ function deriveCuratedGroupSlug(name) {
     .replace(/^-+|-+$/g, "");
 }
 
+function sampleObjectIds(objectIds, limit = searchPageSize * 2) {
+  const sampledObjectIds = [...objectIds];
+
+  for (let index = sampledObjectIds.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const currentValue = sampledObjectIds[index];
+    sampledObjectIds[index] = sampledObjectIds[swapIndex];
+    sampledObjectIds[swapIndex] = currentValue;
+  }
+
+  return sampledObjectIds.slice(0, Math.max(0, limit));
+}
+
 function normalizeSearchResult(record) {
   const imageUrl = record.primaryImageSmall || record.primaryImage || "";
   const hydrationStatus = String(record.hydrationStatus ?? "").trim();
@@ -162,6 +175,65 @@ export function createRuntimeCatalog({ records = null, curatedGroups = [], datab
 }
 
 export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {}) {
+  const adminCuratedGroups = [
+    {
+      slug: "homepage",
+      name: "Homepage Gallery",
+      isHomepageFeatured: true,
+      objectIds: []
+    }
+  ];
+
+  function findAdminCuratedGroup(groupSlug) {
+    return adminCuratedGroups.find((group) => group.slug === groupSlug) ?? null;
+  }
+
+  function mapAdminCuratedGroup(group) {
+    return {
+      slug: group.slug,
+      name: group.name,
+      objectCount: group.objectIds.length,
+      isHomepageFeatured: Boolean(group.isHomepageFeatured)
+    };
+  }
+
+  function filterSearchRecords(searchState) {
+    const normalizedSearchState = normalizeSearchState(searchState);
+    const query = normalizedSearchState.query.toLowerCase();
+
+    return records.filter((record) => {
+      const haystack = [record.title, record.artistDisplayName, record.culture]
+        .map((value) => value?.toLowerCase() ?? "")
+        .join(" ");
+      const matchesDepartment =
+        normalizedSearchState.departmentId == null ||
+        record.departmentId === normalizedSearchState.departmentId;
+
+      return (
+        haystack.includes(query) &&
+        matchesDepartment &&
+        (!normalizedSearchState.excludeRestricted || record.isPublicDomain !== false) &&
+        matchesCuratedMedium(record, normalizedSearchState.medium)
+      );
+    });
+  }
+
+  function buildAdminGalleryItem(objectId, position) {
+    const record = records.find((candidate) => candidate.objectID === objectId);
+
+    if (!record) {
+      return null;
+    }
+
+    return {
+      objectId,
+      position,
+      title: record.title,
+      artist: normalizeArtist(record),
+      imageUrl: record.primaryImageSmall || record.primaryImage || ""
+    };
+  }
+
   return {
     isReady() {
       return true;
@@ -169,22 +241,7 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
 
     async searchCollection(searchState) {
       const normalizedSearchState = normalizeSearchState(searchState);
-      const query = normalizedSearchState.query.toLowerCase();
-      const filteredRecords = records.filter((record) => {
-        const haystack = [record.title, record.artistDisplayName, record.culture]
-          .map((value) => value?.toLowerCase() ?? "")
-          .join(" ");
-        const matchesDepartment =
-          normalizedSearchState.departmentId == null ||
-          record.departmentId === normalizedSearchState.departmentId;
-
-      return (
-          haystack.includes(query) &&
-          matchesDepartment &&
-          (!normalizedSearchState.excludeRestricted || record.isPublicDomain !== false) &&
-          matchesCuratedMedium(record, normalizedSearchState.medium)
-        );
-      });
+      const filteredRecords = filterSearchRecords(normalizedSearchState);
       const pageStart = (normalizedSearchState.page - 1) * searchPageSize;
 
       return {
@@ -233,37 +290,67 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
       };
     },
 
-    async getAdminGallery() {
+    async getAdminGallery({ groupSlug = "homepage" } = {}) {
+      const group = findAdminCuratedGroup(groupSlug);
+
       return {
-        results: []
+        results: group
+          ? group.objectIds
+              .map((objectId, index) => buildAdminGalleryItem(objectId, index + 1))
+              .filter(Boolean)
+          : []
       };
     },
 
     async getAdminCuratedGroups() {
       return {
-        results: [
-          {
-            slug: "homepage",
-            name: "Homepage Gallery",
-            objectCount: 0,
-            isHomepageFeatured: true
-          }
-        ]
+        results: adminCuratedGroups.map(mapAdminCuratedGroup)
       };
     },
 
     async createAdminCuratedGroup({ name }) {
-      if (name === "Homepage Gallery") {
+      if (adminCuratedGroups.some((group) => group.name.toLowerCase() === name.toLowerCase())) {
         return {
           error: "Curated group name already exists."
         };
       }
 
-      return {
+      const group = {
         slug: deriveCuratedGroupSlug(name),
         name,
-        objectCount: 0
+        isHomepageFeatured: false,
+        objectIds: []
       };
+      adminCuratedGroups.push(group);
+
+      return mapAdminCuratedGroup(group);
+    },
+
+    async createAdminCuratedGroupFromSearch(searchState, { limit = 16 } = {}) {
+      const normalizedSearchState = normalizeSearchState(searchState);
+      const name = String(searchState?.name ?? "").trim();
+      const matchingRecords = filterSearchRecords(normalizedSearchState);
+
+      if (adminCuratedGroups.some((group) => group.name.toLowerCase() === name.toLowerCase())) {
+        return {
+          error: "Curated group name already exists."
+        };
+      }
+
+      const objectIds = sampleObjectIds(
+        matchingRecords.map((record) => record.objectID),
+        limit
+      );
+      const group = {
+        slug: deriveCuratedGroupSlug(name),
+        name,
+        isHomepageFeatured: false,
+        objectIds
+      };
+
+      adminCuratedGroups.push(group);
+
+      return mapAdminCuratedGroup(group);
     },
 
     async updateAdminCuratedGroup(groupSlug, { name }) {

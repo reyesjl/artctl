@@ -80,7 +80,11 @@ function buildPaginationWindow(page, totalResults) {
   };
 }
 
-export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
+export function SearchPage({
+  apiBaseUrl = "",
+  fetchImpl = fetch,
+  isAdminAuthenticated = false
+}) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q")?.trim() ?? "";
@@ -101,6 +105,8 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [error, setError] = useState("");
   const [randomWorkError, setRandomWorkError] = useState("");
   const [randomWorkStatus, setRandomWorkStatus] = useState("idle");
+  const [curateSearchError, setCurateSearchError] = useState("");
+  const [curateSearchStatus, setCurateSearchStatus] = useState("idle");
   const [status, setStatus] = useState("idle");
   const [showFilters, setShowFilters] = useState(false);
   const [hoverPreview, setHoverPreview] = useState(null);
@@ -460,6 +466,52 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     }
   }
 
+  async function handleCurateSearch() {
+    if (curateSearchStatus === "loading" || !query) {
+      return;
+    }
+
+    const groupName = window.prompt("Name this curated group:", query)?.trim() ?? "";
+
+    if (!groupName) {
+      return;
+    }
+
+    setCurateSearchError("");
+    setCurateSearchStatus("loading");
+
+    try {
+      const response = await fetchImpl(`${apiBaseUrl}/api/admin/curated-groups/from-search`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          name: groupName,
+          query,
+          departmentId,
+          medium,
+          excludeRestricted
+        })
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data?.group?.slug) {
+        setCurateSearchError(data?.error || "Unable to curate this search.");
+        setCurateSearchStatus("idle");
+        return;
+      }
+
+      setCurateSearchStatus("idle");
+      navigate(`/admin/curated-groups/${data.group.slug}`);
+    } catch (error) {
+      setCurateSearchError(
+        error instanceof Error ? error.message : "Unable to curate this search."
+      );
+      setCurateSearchStatus("idle");
+    }
+  }
+
   const activeDepartment = departments.find(
     (department) => String(department.departmentId) === draftDepartmentId
   );
@@ -524,10 +576,24 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
                 >
                   {randomWorkStatus === "loading" ? "[finding random work]" : "[random work]"}
                 </button>
+                {isAdminAuthenticated && status === "success" && totalResults > 0 ? (
+                  <button
+                    type="button"
+                    className={curateSearchStatus === "loading" ? "text-action text-primary" : "text-action"}
+                    disabled={curateSearchStatus === "loading"}
+                    onClick={() => {
+                      void handleCurateSearch();
+                    }}
+                  >
+                    {curateSearchStatus === "loading" ? "[curating search]" : "[curate search]"}
+                  </button>
+                ) : null}
             </div>
           </div>
-          {randomWorkError ? (
-            <p className="m-0 px-3 pb-2 text-xs text-foreground">{randomWorkError}</p>
+          {randomWorkError || curateSearchError ? (
+            <p className="m-0 px-3 pb-2 text-xs text-foreground">
+              {randomWorkError || curateSearchError}
+            </p>
           ) : null}
         </form>
         <div className="sr-only">

@@ -151,6 +151,19 @@ function deriveCuratedGroupSlug(name) {
     .replace(/^-+|-+$/g, "");
 }
 
+function sampleObjectIds(objectIds, limit = defaultCuratedGalleryBatchSize) {
+  const sampledObjectIds = [...objectIds];
+
+  for (let index = sampledObjectIds.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const currentValue = sampledObjectIds[index];
+    sampledObjectIds[index] = sampledObjectIds[swapIndex];
+    sampledObjectIds[swapIndex] = currentValue;
+  }
+
+  return sampledObjectIds.slice(0, Math.max(0, limit));
+}
+
 function withDatabase(databasePath, work) {
   const database = new DatabaseSync(databasePath);
 
@@ -782,6 +795,91 @@ export function createSqliteCatalog({
           .run(slug, name);
 
         return selectCuratedGroupBySlug(database, slug);
+      });
+    },
+
+    async createAdminCuratedGroupFromSearch(searchState, { limit = 16 } = {}) {
+      return withDatabase(databasePath, (database) => {
+        migrateLegacyCuratedGalleryItems(database);
+        const normalizedSearch = normalizeSearchState(searchState);
+        const name = String(searchState?.name ?? "").trim();
+        const ftsQuery = normalizeFtsQuery(normalizedSearch.query);
+        const departmentClause =
+          normalizedSearch.departmentId == null ? "" : "AND department_id = ?";
+        const restrictedClause = normalizedSearch.excludeRestricted
+          ? "AND objects.is_public_domain = 1"
+          : "";
+        const rows = database
+          .prepare(
+            `
+              SELECT ${catalogRecordProjectionSql}
+              FROM objects
+              JOIN objects_fts ON objects_fts.object_id = objects.object_id
+              WHERE objects_fts MATCH ?
+              ${departmentClause}
+              ${restrictedClause}
+              ORDER BY objects.object_id
+            `
+          )
+          .all(
+            ...(normalizedSearch.departmentId == null
+              ? [ftsQuery]
+              : [ftsQuery, normalizedSearch.departmentId])
+          );
+        const matchingObjectIds = sampleObjectIds(
+          rows
+            .filter((record) => matchesCuratedMedium(record, normalizedSearch.medium))
+            .map((record) => record.objectID),
+          limit
+        );
+        const existingName = database
+          .prepare(
+            `
+              SELECT group_id AS groupId
+              FROM curated_groups
+              WHERE name = ?
+            `
+          )
+          .get(name);
+
+        if (existingName) {
+          return {
+            error: "Curated group name already exists."
+          };
+        }
+
+        const groupSlug = deriveCuratedGroupSlug(name);
+
+        database.exec("BEGIN");
+
+        try {
+          database
+            .prepare(
+              `
+                INSERT INTO curated_groups (slug, name)
+                VALUES (?, ?)
+              `
+            )
+            .run(groupSlug, name);
+
+          const groupId = getCuratedGroupId(database, groupSlug);
+          matchingObjectIds.forEach((objectId, index) => {
+            database
+              .prepare(
+                `
+                  INSERT INTO curated_group_objects (group_id, position, object_id)
+                  VALUES (?, ?, ?)
+                `
+              )
+              .run(groupId, index + 1, objectId);
+          });
+          database.exec("COMMIT");
+        } catch (error) {
+          database.exec("ROLLBACK");
+          throw error;
+        }
+
+        return selectCuratedGroupBySlug(database, groupSlug);
       });
     },
 

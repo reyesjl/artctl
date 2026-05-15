@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import httpMocks from "node-mocks-http";
 import { createArtctlApp } from "../server/app.js";
-import { createUninitializedCatalog } from "../server/catalog.js";
+import { createRuntimeCatalog, createUninitializedCatalog } from "../server/catalog.js";
 import { runCatalogImport } from "../server/catalog-import.js";
 import {
   getObjectHydrationState,
@@ -677,6 +677,94 @@ describe("configured SQLite catalog runtime", () => {
           isHomepageFeatured: true
         }
       ]
+    });
+  });
+
+  test("POST /api/admin/curated-groups/from-search creates a curated group from the full search subset", async () => {
+    const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+
+    try {
+      const records = Array.from({ length: 30 }, (_, index) => {
+        const objectId = index + 1;
+
+        return {
+          objectID: objectId,
+          title: `Landscape Study ${objectId}`,
+          artistDisplayName: `Artist ${objectId}`,
+          culture: "",
+          objectDate: "1900",
+          department: "European Paintings",
+          departmentId: 11,
+          medium: "Oil on canvas",
+          objectName: "Painting",
+          primaryImage: `https://images.metmuseum.org/CRDImages/ep/original/${objectId}.jpg`,
+          primaryImageSmall: `https://images.metmuseum.org/CRDImages/ep/web-large/${objectId}.jpg`,
+          hydrationStatus: "hydrated",
+          isPublicDomain: true,
+          objectURL: `https://www.metmuseum.org/art/collection/search/${objectId}`
+        };
+      });
+      const adminApp = createArtctlApp({
+        catalog: createRuntimeCatalog({ records })
+      });
+
+      const response = await makeAdminRequest("/api/admin/curated-groups/from-search", adminApp, {
+        method: "POST",
+        body: {
+          name: "Evening Landscapes",
+          query: "Landscape"
+        }
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(JSON.parse(response._getData())).toEqual({
+        ok: true,
+        group: {
+          slug: "evening-landscapes",
+          name: "Evening Landscapes",
+          objectCount: 16,
+          isHomepageFeatured: false
+        }
+      });
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  test("POST /api/admin/curated-groups/from-search requires a curated group name", async () => {
+    const adminApp = createArtctlApp({
+      catalog: createRuntimeCatalog({
+        records: [
+          {
+            objectID: 1,
+            title: "Landscape Study 1",
+            artistDisplayName: "Artist 1",
+            culture: "",
+            objectDate: "1900",
+            department: "European Paintings",
+            departmentId: 11,
+            medium: "Oil on canvas",
+            objectName: "Painting",
+            primaryImage: "https://images.metmuseum.org/CRDImages/ep/original/1.jpg",
+            primaryImageSmall: "https://images.metmuseum.org/CRDImages/ep/web-large/1.jpg",
+            hydrationStatus: "hydrated",
+            isPublicDomain: true,
+            objectURL: "https://www.metmuseum.org/art/collection/search/1"
+          }
+        ]
+      })
+    });
+
+    const response = await makeAdminRequest("/api/admin/curated-groups/from-search", adminApp, {
+      method: "POST",
+      body: {
+        query: "Landscape"
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "Curated group name is required."
     });
   });
 

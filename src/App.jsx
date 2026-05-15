@@ -317,7 +317,13 @@ function AppShell({
         />
         <Route
           path="/search"
-          element={<SearchPage apiBaseUrl={apiBaseUrl} fetchImpl={fetchImpl} />}
+          element={
+            <SearchPage
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              isAdminAuthenticated={adminSession.authenticated}
+            />
+          }
         />
         <Route
           path="/works/:objectId"
@@ -412,7 +418,7 @@ function AppShell({
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
       <footer className="app-footer-strip bg-background px-4 py-3 text-center text-[10px] text-muted-foreground">
-        ARTCTL v1.10
+        ARTCTL v1.11
       </footer>
     </div>
   );

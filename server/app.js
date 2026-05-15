@@ -660,6 +660,62 @@ export function createArtctlApp(options = {}) {
     });
   });
 
+  app.post("/api/admin/curated-groups/from-search", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    const name = String(request.body?.name ?? "").trim();
+    const query = String(request.body?.query ?? "").trim();
+    const departmentId = String(request.body?.departmentId ?? "").trim();
+    const medium = String(request.body?.medium ?? "").trim();
+    const excludeRestricted = normalizeExcludeRestricted(request.body?.excludeRestricted);
+
+    if (!name) {
+      response.status(400).json({
+        error: "Curated group name is required."
+      });
+      return;
+    }
+
+    if (!query) {
+      response.status(400).json({
+        error: "Query is required."
+      });
+      return;
+    }
+
+    if (!catalog?.createAdminCuratedGroupFromSearch) {
+      response.status(501).json({
+        error: "Curated group editing is not supported."
+      });
+      return;
+    }
+
+    const group = await catalog.createAdminCuratedGroupFromSearch(
+      {
+        name,
+        query,
+        departmentId: departmentId ? normalizePositiveInteger(departmentId, null) : null,
+        medium,
+        excludeRestricted
+      },
+      { limit: 16 }
+    );
+
+    if (group?.error) {
+      response.status(409).json({
+        error: group.error
+      });
+      return;
+    }
+
+    response.status(201).json({
+      ok: true,
+      group
+    });
+  });
+
   app.patch("/api/admin/curated-groups/:slug/feature", async (request, response) => {
     if (!ensureCatalogReady(response, catalog)) {
       return;
