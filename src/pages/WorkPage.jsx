@@ -196,6 +196,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
     imageRecoveryPhase === "stage-2" ||
     imageRecoveryPhase === "stage-3" ||
     imageRecoveryPhase === "stage-4";
+  const isArtworkLoading = Boolean(work?.imageUrl) && imageRecoveryPhase === "idle";
 
   useEffect(() => {
     if (!work?.imageUrl || isImageRecoveryBlockingInteraction) {
@@ -869,7 +870,7 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
                       {desktopViewerControls}
                     </figcaption>
                   ) : null}
-                  <div ref={imageStageRef} className="work-image-stage min-h-[320px] overflow-hidden">
+                  <div ref={imageStageRef} className="work-image-stage relative min-h-[320px] overflow-hidden">
                     <ProgressiveArtworkImage
                       key={work.imageUrl}
                       ref={imageRef}
@@ -896,6 +897,11 @@ export function WorkPage({ apiBaseUrl = "", fetchImpl = fetch, isAdminAuthentica
                         transition: imageTransition
                       }}
                     />
+                    {isArtworkLoading ? (
+                      <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-muted-foreground pointer-events-none">
+                        Loading image...
+                      </div>
+                    ) : null}
                   </div>
                   {isStudyOverlayVisible && !isMobileLayout ? (
                     <section

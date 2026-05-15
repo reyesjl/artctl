@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ProgressiveArtworkImage } from "../components/ProgressiveArtworkImage.jsx";
 import { RouteFrame } from "../components/RouteFrame.jsx";
+import { buildArtworkProxyUrl } from "../lib/artwork-image-proxy.js";
 
 function normalizePageParam(value) {
   const parsedPage = Number.parseInt(value ?? "", 10);
@@ -53,6 +55,16 @@ const PAGINATION_WINDOW_SIZE = 10;
 const RANDOM_WORK_MAX_ATTEMPTS = 5;
 const RANDOM_WORK_RETRY_DELAY_MS = 500;
 const RANDOM_WORK_RETRY_JITTER_MS = 250;
+const HOVER_PREVIEW_OFFSET_X = 18;
+const HOVER_PREVIEW_OFFSET_Y = 18;
+const HOVER_HYDRATION_DEBOUNCE_MS = 180;
+
+function createPreviewPosition(event) {
+  return {
+    x: event.clientX + HOVER_PREVIEW_OFFSET_X,
+    y: event.clientY + HOVER_PREVIEW_OFFSET_Y
+  };
+}
 
 function buildPaginationWindow(page, totalResults) {
   const totalPages = Math.max(1, Math.ceil(totalResults / SEARCH_PAGE_SIZE));
@@ -91,6 +103,21 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [randomWorkStatus, setRandomWorkStatus] = useState("idle");
   const [status, setStatus] = useState("idle");
   const [showFilters, setShowFilters] = useState(false);
+  const [hoverPreview, setHoverPreview] = useState(null);
+  const hoverPreviewTimerRef = useRef(null);
+  const hoverPreviewRequestRef = useRef(0);
+  const hoverPreviewPositionRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (hoverPreviewTimerRef.current) {
+        window.clearTimeout(hoverPreviewTimerRef.current);
+        hoverPreviewTimerRef.current = null;
+      }
+      hoverPreviewRequestRef.current += 1;
+      setHoverPreview(null);
+    };
+  }, []);
 
   useEffect(() => {
     setDraftQuery(query);
@@ -260,6 +287,99 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     setDraftDepartmentId("");
     setDraftMedium("");
     setDraftExcludeRestricted(true);
+  }
+
+  function clearHoverPreviewIntent() {
+    if (hoverPreviewTimerRef.current) {
+      window.clearTimeout(hoverPreviewTimerRef.current);
+      hoverPreviewTimerRef.current = null;
+    }
+    hoverPreviewRequestRef.current += 1;
+    hoverPreviewPositionRef.current = null;
+  }
+
+  async function showHoverPreview(result, event) {
+    if (!result) {
+      return;
+    }
+
+    const position = createPreviewPosition(event);
+    hoverPreviewPositionRef.current = position;
+
+    if (result.imageUrl) {
+      clearHoverPreviewIntent();
+      setHoverPreview({
+        status: "ready",
+        result: {
+          ...result,
+          imageUrl: result.imageUrl
+        },
+        ...position
+      });
+      return;
+    }
+
+    if (result.hydrationStatus === "no_image") {
+      return;
+    }
+
+    const requestId = hoverPreviewRequestRef.current + 1;
+    clearHoverPreviewIntent();
+    hoverPreviewRequestRef.current = requestId;
+    hoverPreviewPositionRef.current = position;
+
+    hoverPreviewTimerRef.current = window.setTimeout(async () => {
+      hoverPreviewTimerRef.current = null;
+      setHoverPreview({
+        status: "loading",
+        result,
+        ...(hoverPreviewPositionRef.current ?? position)
+      });
+
+      try {
+        const response = await fetchImpl(`${apiBaseUrl}/api/works/${result.objectId}`);
+        const work = await response.json();
+
+        if (hoverPreviewRequestRef.current !== requestId) {
+          return;
+        }
+
+        if (!response.ok || !work?.imageUrl) {
+          setHoverPreview((currentPreview) => (
+            currentPreview?.result?.objectId === result.objectId ? null : currentPreview
+          ));
+          return;
+        }
+
+        setHoverPreview((currentPreview) => {
+          if (hoverPreviewRequestRef.current !== requestId) {
+            return currentPreview;
+          }
+
+          return {
+            status: "ready",
+            result: {
+              ...result,
+              imageUrl: work.imageUrl
+            },
+            ...(hoverPreviewPositionRef.current ?? position)
+          };
+        });
+      } catch {
+        if (hoverPreviewRequestRef.current !== requestId) {
+          return;
+        }
+
+        setHoverPreview((currentPreview) => (
+          currentPreview?.result?.objectId === result.objectId ? null : currentPreview
+        ));
+      }
+    }, HOVER_HYDRATION_DEBOUNCE_MS);
+  }
+
+  function hideHoverPreview() {
+    clearHoverPreviewIntent();
+    setHoverPreview(null);
   }
 
   async function handleRandomWork() {
@@ -585,10 +705,56 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           <p className="m-0 text-xs text-muted-foreground">
             {`${totalResults} ${totalResults === 1 ? "result" : "results"} · in ${formatSearchDuration(searchDurationMs)} · Page ${page}`}
           </p>
+          {hoverPreview ? (
+            <div
+              aria-label={`${hoverPreview.result.title} hover preview`}
+              className="pointer-events-none fixed z-50 w-40 overflow-hidden border border-border bg-card p-1 shadow-lg"
+              style={{
+                left: `${hoverPreview.x}px`,
+                top: `${hoverPreview.y}px`
+              }}
+            >
+              {hoverPreview.status === "loading" ? (
+                <div className="flex aspect-[4/3] w-full items-center justify-center bg-secondary text-[10px] text-muted-foreground">
+                  Loading preview...
+                </div>
+              ) : (
+                <ProgressiveArtworkImage
+                  className="block aspect-[4/3] w-full object-cover"
+                  src={hoverPreview.result.imageUrl}
+                  processingSrc={buildArtworkProxyUrl(hoverPreview.result.imageUrl, { apiBaseUrl })}
+                  alt={`${hoverPreview.result.title} preview`}
+                  sequenceProfile="gallery"
+                />
+              )}
+            </div>
+          ) : null}
           <ul className="search-results mt-4 list-none border-t border-border p-0">
             {results.map((result) => (
               <li key={result.objectId} className="search-result border-b border-border py-3">
-                <Link className="font-medium text-primary" to={`/works/${result.objectId}`}>
+                <Link
+                  className="font-medium text-primary"
+                  to={`/works/${result.objectId}`}
+                  onMouseEnter={(event) => {
+                    void showHoverPreview(result, event);
+                  }}
+                  onMouseMove={(event) => {
+                    if (hoverPreview?.result?.objectId === result.objectId) {
+                      setHoverPreview((currentPreview) => (
+                        currentPreview
+                          ? {
+                              ...currentPreview,
+                              ...createPreviewPosition(event)
+                            }
+                          : currentPreview
+                      ));
+                      return;
+                    }
+
+                    void showHoverPreview(result, event);
+                  }}
+                  onMouseLeave={hideHoverPreview}
+                >
                   {result.title}
                 </Link>
                 <p className="search-result-meta mt-1 text-sm text-muted-foreground">

@@ -2,6 +2,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { act } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ProgressiveArtworkImage } from "../src/components/ProgressiveArtworkImage.jsx";
+import { SettingsProvider } from "../src/settings-provider.jsx";
 
 function installMatchMedia({ reducedMotion = false } = {}) {
   window.matchMedia = (query) => ({
@@ -212,7 +213,7 @@ test("reconstructs an artwork image through staged recovery before revealing the
   });
 });
 
-test("skips the reconstruction sequence when reduced motion is enabled", async () => {
+test("still runs the reconstruction sequence when reduced motion is enabled", async () => {
   installMatchMedia({ reducedMotion: true });
 
   render(
@@ -223,6 +224,35 @@ test("skips the reconstruction sequence when reduced motion is enabled", async (
       className="block w-full"
       sequenceProfile="work"
     />
+  );
+
+  const image = screen.getByRole("img", { name: "The Great Wave off Kanagawa" });
+  await act(async () => {
+    fireEvent.load(image);
+    await Promise.resolve();
+  });
+
+  expect(screen.getByLabelText("The Great Wave off Kanagawa reconstruction")).toHaveAttribute(
+    "aria-busy",
+    "true"
+  );
+  expect(screen.getByTestId("progressive-artwork-canvas")).toBeInTheDocument();
+  expect(image).toHaveStyle({
+    opacity: "0"
+  });
+});
+
+test("skips the reconstruction sequence when the dither setting is disabled", async () => {
+  render(
+    <SettingsProvider initialDitherEnabled={false}>
+      <ProgressiveArtworkImage
+        src="https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg"
+        processingSrc="/api/image-proxy?url=https%3A%2F%2Fimages.metmuseum.org%2FCRDImages%2Fas%2Foriginal%2FDP130155.jpg"
+        alt="The Great Wave off Kanagawa"
+        className="block w-full"
+        sequenceProfile="work"
+      />
+    </SettingsProvider>
   );
 
   const image = screen.getByRole("img", { name: "The Great Wave off Kanagawa" });

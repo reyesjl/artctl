@@ -54,6 +54,7 @@ const THEME_POINTS = [
   "museum catalog interfaces",
   "old display hardware"
 ];
+const SECTION_FLASH_DURATION_MS = 2200;
 
 function getActiveSectionFromHash() {
   if (typeof window === "undefined" || !window.location.hash) {
@@ -79,10 +80,12 @@ function scrollToHashSection() {
   }
 }
 
-function HelpSection({ id, title, children }) {
+function HelpSection({ id, title, children, shouldFlash = false }) {
   return (
     <section id={id} className="space-y-2 scroll-mt-6">
-      <div className="text-primary text-xs">── {title} ──</div>
+      <div className={["text-primary text-xs", shouldFlash ? "help-section-flash" : ""].join(" ").trim()}>
+        ── {title} ──
+      </div>
       {children}
     </section>
   );
@@ -121,10 +124,15 @@ function InlineExample({ label, children }) {
 
 export function HelpPage() {
   const [activeSection, setActiveSection] = useState(getActiveSectionFromHash);
+  const [flashingSection, setFlashingSection] = useState(() => (
+    typeof window !== "undefined" && window.location.hash ? getActiveSectionFromHash() : ""
+  ));
 
   useEffect(() => {
     const handleHashChange = () => {
-      setActiveSection(getActiveSectionFromHash());
+      const nextSection = getActiveSectionFromHash();
+      setActiveSection(nextSection);
+      setFlashingSection(nextSection);
       scrollToHashSection();
     };
 
@@ -135,6 +143,22 @@ export function HelpPage() {
       window.removeEventListener("hashchange", handleHashChange);
     };
   }, []);
+
+  useEffect(() => {
+    if (!flashingSection) {
+      return undefined;
+    }
+
+    const timerId = window.setTimeout(() => {
+      setFlashingSection((currentSection) => (
+        currentSection === flashingSection ? "" : currentSection
+      ));
+    }, SECTION_FLASH_DURATION_MS);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+  }, [flashingSection]);
 
   return (
     <main className="app-main">
@@ -184,7 +208,11 @@ export function HelpPage() {
             </p>
           </div>
 
-          <HelpSection id="why-artctl-exists" title="WHY ARTCTL EXISTS">
+          <HelpSection
+            id="why-artctl-exists"
+            title="WHY ARTCTL EXISTS"
+            shouldFlash={flashingSection === "why-artctl-exists"}
+          >
             <p className="text-xs text-muted-foreground">
               Most art interfaces are optimized for scrolling.
             </p>
@@ -202,7 +230,11 @@ export function HelpPage() {
             </p>
           </HelpSection>
 
-          <HelpSection id="study-works" title="STUDY WORKS">
+          <HelpSection
+            id="study-works"
+            title="STUDY WORKS"
+            shouldFlash={flashingSection === "study-works"}
+          >
             <p className="text-xs text-muted-foreground">
               ARTCTL combines machine observation, collection metadata, and
               historical references to generate structured viewing notes for
@@ -234,7 +266,11 @@ export function HelpPage() {
             </p>
           </HelpSection>
 
-          <HelpSection id="buying-prints" title="BUYING PRINTS">
+          <HelpSection
+            id="buying-prints"
+            title="BUYING PRINTS"
+            shouldFlash={flashingSection === "buying-prints"}
+          >
             <p className="text-xs text-muted-foreground">
               When print purchasing is enabled, that money helps cover the
               ongoing costs of running ARTCTL.
@@ -266,7 +302,11 @@ export function HelpPage() {
             </p>
           </HelpSection>
 
-          <HelpSection id="curated-gallery" title="CURATED GALLERY">
+          <HelpSection
+            id="curated-gallery"
+            title="CURATED GALLERY"
+            shouldFlash={flashingSection === "curated-gallery"}
+          >
             <p className="text-xs text-muted-foreground">
               The homepage gallery is manually curated.
             </p>
@@ -284,7 +324,11 @@ export function HelpPage() {
             </p>
           </HelpSection>
 
-          <HelpSection id="search" title="SEARCH">
+          <HelpSection
+            id="search"
+            title="SEARCH"
+            shouldFlash={flashingSection === "search"}
+          >
             <p className="text-xs text-muted-foreground">
               Search across 400,000+ public-domain works indexed from museum
               collection data.
@@ -299,7 +343,11 @@ export function HelpPage() {
             />
           </HelpSection>
 
-          <HelpSection id="system-design" title="SYSTEM DESIGN">
+          <HelpSection
+            id="system-design"
+            title="SYSTEM DESIGN"
+            shouldFlash={flashingSection === "system-design"}
+          >
             <div className="space-y-1.5">
               <Row
                 label="[local index]"
@@ -320,7 +368,11 @@ export function HelpPage() {
             </div>
           </HelpSection>
 
-          <HelpSection id="themes" title="THEMES">
+          <HelpSection
+            id="themes"
+            title="THEMES"
+            shouldFlash={flashingSection === "themes"}
+          >
             <p className="text-xs text-muted-foreground">
               Themes are inspired by:
             </p>
@@ -334,7 +386,11 @@ export function HelpPage() {
             </p>
           </HelpSection>
 
-          <HelpSection id="collection-source" title="COLLECTION SOURCE">
+          <HelpSection
+            id="collection-source"
+            title="COLLECTION SOURCE"
+            shouldFlash={flashingSection === "collection-source"}
+          >
             <p className="text-xs text-muted-foreground">
               ARTCTL is an independent project and is not affiliated with the
               Metropolitan Museum of Art.
@@ -356,7 +412,11 @@ export function HelpPage() {
             </p>
           </HelpSection>
 
-          <HelpSection id="about-me" title="ABOUT ME">
+          <HelpSection
+            id="about-me"
+            title="ABOUT ME"
+            shouldFlash={flashingSection === "about-me"}
+          >
             <p className="text-xs text-muted-foreground">
               I am a software engineer with 10+ years of experience in
               full-stack work.

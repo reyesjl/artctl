@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useRef, useState } from "react";
+import { useSettings } from "../settings-provider.jsx";
 
 const BAYER_4X4 = [
   [0, 8, 2, 10],
@@ -28,34 +29,6 @@ function clampChannel(value) {
 
 function getGrayscale(red, green, blue) {
   return Math.round((0.299 * red) + (0.587 * green) + (0.114 * blue));
-}
-
-function usePrefersReducedMotion() {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      : false
-  );
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return undefined;
-    }
-
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const updatePreference = (event) => {
-      setPrefersReducedMotion(event.matches);
-    };
-
-    setPrefersReducedMotion(mediaQuery.matches);
-    mediaQuery.addEventListener("change", updatePreference);
-
-    return () => {
-      mediaQuery.removeEventListener("change", updatePreference);
-    };
-  }, []);
-
-  return prefersReducedMotion;
 }
 
 function createProcessingCanvas(width, height) {
@@ -269,7 +242,7 @@ export const ProgressiveArtworkImage = forwardRef(function ProgressiveArtworkIma
   ...imgProps
 }, forwardedRef) {
   const profile = SEQUENCE_PROFILES[sequenceProfile] ?? SEQUENCE_PROFILES.gallery;
-  const prefersReducedMotion = usePrefersReducedMotion();
+  const { ditherEnabled } = useSettings();
   const [phase, setPhase] = useState("idle");
   const [isSourceReady, setIsSourceReady] = useState(false);
   const [processingImage, setProcessingImage] = useState(null);
@@ -279,7 +252,7 @@ export const ProgressiveArtworkImage = forwardRef(function ProgressiveArtworkIma
   const canvasRef = useRef(null);
   const wrapperRef = useRef(null);
   const timerIdsRef = useRef([]);
-  const isReconstructionEnabled = Boolean(processingSrc) && !prefersReducedMotion;
+  const isReconstructionEnabled = Boolean(processingSrc) && ditherEnabled;
 
   useEffect(() => {
     onReconstructionStateChange?.(phase);
@@ -318,7 +291,7 @@ export const ProgressiveArtworkImage = forwardRef(function ProgressiveArtworkIma
   }, [isSourceReady, src]);
 
   useEffect(() => {
-    if (!processingSrc || !isSourceReady || prefersReducedMotion) {
+    if (!processingSrc || !isSourceReady || !ditherEnabled) {
       return undefined;
     }
 
@@ -351,14 +324,14 @@ export const ProgressiveArtworkImage = forwardRef(function ProgressiveArtworkIma
       nextProcessingImage.onload = null;
       nextProcessingImage.onerror = null;
     };
-  }, [isSourceReady, prefersReducedMotion, processingSrc]);
+  }, [ditherEnabled, isSourceReady, processingSrc]);
 
   useEffect(() => {
     if (!src || !isSourceReady || !isVisible) {
       return undefined;
     }
 
-    if (prefersReducedMotion) {
+    if (!ditherEnabled) {
       setPhase("complete");
       return undefined;
     }
@@ -432,7 +405,7 @@ export const ProgressiveArtworkImage = forwardRef(function ProgressiveArtworkIma
       timerIdsRef.current.forEach((timerId) => window.clearTimeout(timerId));
       timerIdsRef.current = [];
     };
-  }, [isSourceReady, isVisible, prefersReducedMotion, processingImage, processingStatus, profile, src]);
+  }, [ditherEnabled, isSourceReady, isVisible, processingImage, processingStatus, profile, src]);
 
   const isCanvasVisible = phase === "stage-1" || phase === "stage-2" || phase === "stage-3";
   const isPreparingReconstruction = isReconstructionEnabled && phase === "idle";

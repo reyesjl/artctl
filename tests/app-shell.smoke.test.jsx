@@ -285,6 +285,93 @@ function dispatchTouchEvent(target, type, touches, changedTouches = touches) {
   fireEvent(target, new Event(type, { bubbles: true, cancelable: true }));
 }
 
+function installCanvasMock() {
+  const context = {
+    clearRect() {},
+    drawImage() {},
+    getImageData(width = 1, height = 1) {
+      return {
+        data: new Uint8ClampedArray(width * height * 4).fill(128),
+        width,
+        height
+      };
+    },
+    putImageData() {},
+    save() {},
+    restore() {},
+    setTransform() {},
+    imageSmoothingEnabled: true
+  };
+
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    value: vi.fn(() => context)
+  });
+}
+
+function installImageGeometry() {
+  const originalNaturalWidth = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "naturalWidth");
+  const originalNaturalHeight = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "naturalHeight");
+
+  Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", {
+    configurable: true,
+    get() {
+      return 1200;
+    }
+  });
+  Object.defineProperty(HTMLImageElement.prototype, "naturalHeight", {
+    configurable: true,
+    get() {
+      return 900;
+    }
+  });
+
+  return () => {
+    if (originalNaturalWidth) {
+      Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", originalNaturalWidth);
+    }
+    if (originalNaturalHeight) {
+      Object.defineProperty(HTMLImageElement.prototype, "naturalHeight", originalNaturalHeight);
+    }
+  };
+}
+
+function installProcessingImageMock() {
+  const instances = [];
+  const originalImage = window.Image;
+
+  class MockProcessingImage {
+    constructor() {
+      instances.push(this);
+      this._src = "";
+      this.crossOrigin = null;
+      this.onload = null;
+      this.onerror = null;
+      this.naturalWidth = 1200;
+      this.naturalHeight = 900;
+    }
+
+    set src(value) {
+      this._src = value;
+      queueMicrotask(() => {
+        this.onload?.(new Event("load"));
+      });
+    }
+
+    get src() {
+      return this._src;
+    }
+  }
+
+  window.Image = MockProcessingImage;
+  return {
+    instances,
+    restore() {
+      window.Image = originalImage;
+    }
+  };
+}
+
 beforeEach(() => {
   cleanup();
   installLocalStorage();
@@ -308,8 +395,9 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("ARTCTL v1.9").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.10").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -346,6 +434,7 @@ test("shared navigation hides the admin link when admin auth is configured but n
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "[admin]" })).not.toBeInTheDocument();
 });
 
@@ -362,6 +451,7 @@ test("shared shell opens a full-screen mobile menu from the header toggle", asyn
   expect(within(mobileMenu).getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(within(mobileMenu).getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(within(mobileMenu).getByRole("link", { name: "[theme]" })).toBeInTheDocument();
+  expect(within(mobileMenu).getByRole("link", { name: "Settings" })).toBeInTheDocument();
 });
 
 test("shared shell closes the mobile menu after selecting a navigation link", async () => {
@@ -417,7 +507,8 @@ test.each([
   { route: "/admin/curated-groups/new", heading: "Create Curated Group" },
   { route: "/admin/curated-groups/homepage", heading: "Homepage Gallery" },
   { route: "/help", heading: "Help" },
-  { route: "/theme", heading: "Theme" }
+  { route: "/theme", heading: "Theme" },
+  { route: "/settings", heading: "Settings" }
 ])("route $route renders its skeleton inside the shared shell", async ({ route, heading }) => {
   window.history.pushState({}, "", route);
 
@@ -429,6 +520,7 @@ test.each([
   expect(screen.getAllByRole("link", { name: "[search]" }).length).toBeGreaterThan(0);
   expect(screen.getAllByRole("link", { name: "[help]" }).length).toBeGreaterThan(0);
   expect(screen.getAllByRole("link", { name: "[theme]" }).length).toBeGreaterThan(0);
+  expect(screen.getAllByRole("link", { name: "Settings" }).length).toBeGreaterThan(0);
   if (route.startsWith("/admin")) {
     expect(screen.getByRole("link", { name: "[admin]" })).toBeInTheDocument();
   } else {
@@ -1515,7 +1607,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("ARTCTL v1.9")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.10")).toBeInTheDocument();
 });
 
 test("search route reveals inline filter controls from the filter toggle", async () => {
@@ -2552,6 +2644,280 @@ test("search route renders text actions while preserving current submission beha
     "/works/436121"
   );
   expect(window.location.search).toBe("?q=landscape&departmentId=11&medium=wood");
+});
+
+test("search route shows a floating artwork preview when hovering a result title", async () => {
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: [{ departmentId: 11, displayName: "European Paintings" }]
+      };
+    },
+
+    async searchCollection(searchState) {
+      return {
+        query: searchState.query,
+        results: [
+          {
+            objectId: 436121,
+            title: "Landscape Study",
+            artist: "Artist",
+            date: "1900",
+            imageUrl: "https://images.metmuseum.org/CRDImages/ep/original/DT1567.jpg",
+            hasImage: true,
+            isPublicDomain: true,
+            hydrationStatus: "hydrated"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search");
+  const originalGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  installCanvasMock();
+  const restoreImageGeometry = installImageGeometry();
+  const processingImageMock = installProcessingImageMock();
+
+  try {
+    render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+    const queryInput = await screen.findByLabelText("Query");
+    fireEvent.change(queryInput, {
+      target: { value: "landscape" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+    const resultLink = await screen.findByRole("link", { name: "Landscape Study" });
+
+    fireEvent.mouseEnter(resultLink, { clientX: 140, clientY: 220 });
+    fireEvent.mouseMove(resultLink, { clientX: 140, clientY: 220 });
+
+    const preview = await screen.findByLabelText("Landscape Study hover preview");
+    const previewImage = screen.getByRole("img", { name: "Landscape Study preview" });
+
+    expect(preview).toHaveClass("border");
+    expect(preview).toHaveClass("border-border");
+    expect(previewImage).toHaveAttribute("src", "https://images.metmuseum.org/CRDImages/ep/original/DT1567.jpg");
+
+    fireEvent.load(previewImage);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Landscape Study preview reconstruction")).toHaveAttribute(
+        "aria-busy",
+        "true"
+      );
+    });
+    expect(processingImageMock.instances.at(-1)?.src).toBe(
+      "/api/image-proxy?url=https%3A%2F%2Fimages.metmuseum.org%2FCRDImages%2Fep%2Foriginal%2FDT1567.jpg"
+    );
+  } finally {
+    restoreImageGeometry();
+    processingImageMock.restore();
+    if (originalGetContext) {
+      Object.defineProperty(HTMLCanvasElement.prototype, "getContext", originalGetContext);
+    }
+  }
+});
+
+test("search route does not show a hover preview for results without an image", async () => {
+  const metClient = {
+    async getDepartments() {
+      return {
+        departments: []
+      };
+    },
+
+    async searchCollection(searchState) {
+      return {
+        query: searchState.query,
+        results: [
+          {
+            objectId: 436121,
+            title: "Landscape Study",
+            artist: "Artist",
+            date: "1900",
+            hasImage: false,
+            isPublicDomain: true,
+            hydrationStatus: "no_image"
+          }
+        ]
+      };
+    }
+  };
+
+  window.history.pushState({}, "", "/search");
+  render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+  const queryInput = await screen.findByLabelText("Query");
+  fireEvent.change(queryInput, {
+    target: { value: "landscape" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+  const resultLink = await screen.findByRole("link", { name: "Landscape Study" });
+  fireEvent.mouseEnter(resultLink, { clientX: 140, clientY: 220 });
+  fireEvent.mouseMove(resultLink, { clientX: 140, clientY: 220 });
+
+  expect(screen.queryByLabelText("Landscape Study hover preview")).not.toBeInTheDocument();
+});
+
+test("search route does not hydrate a pending catalog work when the hover ends before the debounce", async () => {
+  const requests = [];
+  const catalog = {
+    isReady() {
+      return true;
+    },
+
+    async getDepartments() {
+      return { departments: [] };
+    },
+
+    async searchCollection(searchState) {
+      return {
+        query: searchState.query,
+        results: [
+          {
+            objectId: 123456,
+            title: "Pending Hydration Work",
+            artist: "Unknown Artist",
+            date: "1900",
+            imageUrl: "",
+            hasImage: false,
+            isPublicDomain: true
+          }
+        ]
+      };
+    },
+
+    async getWork() {
+      throw new Error("hover debounce should prevent this request");
+    }
+  };
+
+  try {
+    window.history.pushState({}, "", "/search");
+    render(<App fetchImpl={createFetchImpl({ requestLog: requests, catalog })} />);
+
+    const queryInput = await screen.findByLabelText("Query");
+    fireEvent.change(queryInput, {
+      target: { value: "pending" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+    const resultLink = await screen.findByRole("link", { name: "Pending Hydration Work" });
+    fireEvent.mouseEnter(resultLink, { clientX: 140, clientY: 220 });
+    fireEvent.mouseLeave(resultLink);
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 300);
+    });
+
+    expect(screen.queryByLabelText("Pending Hydration Work hover preview")).not.toBeInTheDocument();
+    expect(requests).not.toContain("/api/works/123456");
+  } finally {
+  }
+});
+
+test("search route hydrates a pending catalog work on sustained hover and swaps a loading preview into the image preview", async () => {
+  let resolveWork;
+  const catalog = {
+    isReady() {
+      return true;
+    },
+
+    async getDepartments() {
+      return { departments: [] };
+    },
+
+    async searchCollection(searchState) {
+      return {
+        query: searchState.query,
+        results: [
+          {
+            objectId: 123456,
+            title: "Pending Hydration Work",
+            artist: "Unknown Artist",
+            date: "1900",
+            imageUrl: "",
+            hasImage: false,
+            isPublicDomain: true
+          }
+        ]
+      };
+    },
+
+    async getWork(objectId) {
+      return new Promise((resolve) => {
+        resolveWork = () => {
+          resolve({
+            objectId,
+            title: "Pending Hydration Work",
+            artist: "Unknown Artist",
+            date: "1900",
+            context: "Painting - Oil on canvas",
+            dimensions: "",
+            imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+            metUrl: "https://www.metmuseum.org/art/collection/search/123456",
+            isPublicDomain: true,
+            hydrationStatus: "hydrated"
+          });
+        };
+      });
+    }
+  };
+
+  const originalGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  installCanvasMock();
+  const restoreImageGeometry = installImageGeometry();
+  const processingImageMock = installProcessingImageMock();
+
+  try {
+    window.history.pushState({}, "", "/search");
+    render(<App fetchImpl={createFetchImpl({ catalog })} />);
+
+    const queryInput = await screen.findByLabelText("Query");
+    fireEvent.change(queryInput, {
+      target: { value: "pending" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "[search]" }));
+
+    const resultLink = await screen.findByRole("link", { name: "Pending Hydration Work" });
+    fireEvent.mouseEnter(resultLink, { clientX: 140, clientY: 220 });
+    fireEvent.mouseMove(resultLink, { clientX: 140, clientY: 220 });
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 120);
+    });
+    expect(screen.queryByLabelText("Pending Hydration Work hover preview")).not.toBeInTheDocument();
+
+    const loadingPreview = await screen.findByLabelText("Pending Hydration Work hover preview");
+    expect(loadingPreview).toHaveTextContent("Loading preview...");
+    expect(screen.queryByRole("img", { name: "Pending Hydration Work preview" })).not.toBeInTheDocument();
+
+    resolveWork();
+
+    const previewImage = await screen.findByRole("img", { name: "Pending Hydration Work preview" });
+    expect(previewImage).toHaveAttribute("src", "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg");
+
+    fireEvent.load(previewImage);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Pending Hydration Work preview reconstruction")).toHaveAttribute(
+        "aria-busy",
+        "true"
+      );
+    });
+    expect(processingImageMock.instances.at(-1)?.src).toBe(
+      "/api/image-proxy?url=https%3A%2F%2Fimages.metmuseum.org%2FCRDImages%2Fas%2Foriginal%2FDP130155.jpg"
+    );
+  } finally {
+    restoreImageGeometry();
+    processingImageMock.restore();
+    if (originalGetContext) {
+      Object.defineProperty(HTMLCanvasElement.prototype, "getContext", originalGetContext);
+    }
+  }
 });
 
 test("search route retries random work picks that resolve to no_image and only navigates on success", async () => {
@@ -3998,6 +4364,73 @@ test("desktop work viewer hints scroll zoom on artwork hover and zooms with the 
   expect(viewer).toHaveClass("border-border");
 });
 
+test("work page shows a loading indication while the reconstruction image is still downloading", async () => {
+  const metClient = {
+    async getWork(objectId) {
+      return {
+        objectId,
+        title: "The Great Wave off Kanagawa",
+        artist: "Japanese",
+        date: "ca. 1830-32",
+        context: "Print - Polychrome woodblock print; ink and color on paper",
+        imageUrl: "https://images.metmuseum.org/CRDImages/as/original/DP130155.jpg",
+        metUrl: "https://www.metmuseum.org/art/collection/search/45434"
+      };
+    }
+  };
+  const originalImage = window.Image;
+  const originalGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  const restoreImageGeometry = installImageGeometry();
+  const processingImages = [];
+
+  installCanvasMock();
+
+  class PendingProcessingImage {
+    constructor() {
+      processingImages.push(this);
+      this._src = "";
+      this.crossOrigin = null;
+      this.onload = null;
+      this.onerror = null;
+      this.naturalWidth = 1200;
+      this.naturalHeight = 900;
+    }
+
+    set src(value) {
+      this._src = value;
+    }
+
+    get src() {
+      return this._src;
+    }
+  }
+
+  window.Image = PendingProcessingImage;
+
+  try {
+    window.history.pushState({}, "", "/works/436121");
+    render(<App fetchImpl={createFetchImpl({ metClient })} />);
+
+    const image = await screen.findByRole("img", { name: "The Great Wave off Kanagawa" });
+    fireEvent.load(image);
+
+    const loadingIndicator = await screen.findByText("Loading image...");
+    expect(loadingIndicator).toBeInTheDocument();
+
+    processingImages.at(-1)?.onload?.(new Event("load"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Loading image...")).not.toBeInTheDocument();
+    });
+  } finally {
+    restoreImageGeometry();
+    if (originalGetContext) {
+      Object.defineProperty(HTMLCanvasElement.prototype, "getContext", originalGetContext);
+    }
+    window.Image = originalImage;
+  }
+});
+
 test("desktop wheel zoom anchors to the pointer location instead of the image center", async () => {
   const metClient = {
     async getWork(objectId) {
@@ -4641,6 +5074,29 @@ test("help route scrolls to the requested hash section on load", async () => {
   expect(screen.getByRole("link", { name: "[buying prints]" })).toHaveAttribute("aria-current", "location");
 });
 
+test("help route flashes the requested section title on hash arrival", async () => {
+  const scrollIntoView = vi.fn();
+
+  window.history.pushState({}, "", "/help#buying-prints");
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: scrollIntoView
+  });
+
+  render(<App fetchImpl={fetchImpl} />);
+
+  await screen.findByRole("heading", { name: "Help" });
+
+  const buyingPrintsTitle = screen.getByText("── BUYING PRINTS ──");
+  expect(buyingPrintsTitle).toHaveClass("help-section-flash");
+
+  await waitFor(() => {
+    expect(buyingPrintsTitle).not.toHaveClass("help-section-flash");
+  }, {
+    timeout: 3000
+  });
+});
+
 test("help route renders the manual copy on the shared background", async () => {
   window.history.pushState({}, "", "/help");
 
@@ -4705,6 +5161,52 @@ test("theme route matches the Cortex-style theme picker structure and active sta
   expect(screen.getAllByText("✓")).toHaveLength(1);
 });
 
+test("settings route exposes the dither toggle and stores the preference locally", async () => {
+  window.history.pushState({}, "", "/settings");
+  const originalGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  installCanvasMock();
+  const restoreImageGeometry = installImageGeometry();
+  const processingImageMock = installProcessingImageMock();
+
+  try {
+    render(<App fetchImpl={fetchImpl} />);
+
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByText("── settings ──")).toBeInTheDocument();
+    expect(screen.getByText("Control local interface behavior. Your selection is saved locally.")).toBeInTheDocument();
+    const ditherToggle = screen.getByRole("button", { name: "Dither reconstruction" });
+    const previewImage = screen.getByRole("img", { name: "Settings preview artwork" });
+
+    expect(ditherToggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("[on]")).toBeInTheDocument();
+
+    fireEvent.load(previewImage);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Settings preview artwork reconstruction")).toHaveAttribute(
+        "aria-busy",
+        "true"
+      );
+    });
+
+    fireEvent.click(ditherToggle);
+
+    expect(ditherToggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByText("[off]")).toBeInTheDocument();
+    expect(window.localStorage.getItem("artctl-dither-enabled")).toBe("false");
+    expect(screen.getByLabelText("Settings preview artwork reconstruction")).toHaveAttribute(
+      "aria-busy",
+      "false"
+    );
+  } finally {
+    restoreImageGeometry();
+    processingImageMock.restore();
+    if (originalGetContext) {
+      Object.defineProperty(HTMLCanvasElement.prototype, "getContext", originalGetContext);
+    }
+  }
+});
+
 test("theme route renders a themed picker surface while preserving theme selection behavior", async () => {
   window.history.pushState({}, "", "/theme");
 
@@ -4749,7 +5251,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("ARTCTL v1.9")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.10")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 

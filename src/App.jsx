@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Menu, X } from "lucide-react";
+import { Menu, Settings, X } from "lucide-react";
 import { BrowserRouter, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { AdminPage } from "./pages/AdminPage.jsx";
 import { AdminStudyNotesPage } from "./pages/AdminStudyNotesPage.jsx";
@@ -10,8 +10,10 @@ import { CuratedGroupsPage } from "./pages/CuratedGroupsPage.jsx";
 import { HelpPage } from "./pages/HelpPage.jsx";
 import { HomePage } from "./pages/HomePage.jsx";
 import { SearchPage } from "./pages/SearchPage.jsx";
+import { SettingsPage } from "./pages/SettingsPage.jsx";
 import { ThemesPage } from "./pages/ThemesPage.jsx";
 import { WorkPage } from "./pages/WorkPage.jsx";
+import { SettingsProvider } from "./settings-provider.jsx";
 import { ThemeProvider } from "./theme-provider.jsx";
 import "./styles.css";
 
@@ -188,6 +190,19 @@ function AppShell({
     onAdminLoggedOut?.();
   }
 
+  function renderNavigationLabel(item) {
+    if (item.href === "/settings") {
+      return (
+        <>
+          <Settings className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="sr-only">{item.label}</span>
+        </>
+      );
+    }
+
+    return `[${item.label.toLowerCase()}]`;
+  }
+
   return (
     <div className="grid min-h-screen grid-rows-[auto_1fr_auto] bg-background font-mono text-foreground">
       <header className="app-header-strip flex items-center justify-between gap-3 bg-background px-4 py-2 text-foreground">
@@ -211,7 +226,7 @@ function AppShell({
                     .join(" ")
                 }
               >
-                [{item.label.toLowerCase()}]
+                {renderNavigationLabel(item)}
               </NavLink>
             ))}
           </nav>
@@ -278,7 +293,7 @@ function AppShell({
                 }
                 onClick={() => setIsMobileMenuOpen(false)}
               >
-                [{item.label.toLowerCase()}]
+                {renderNavigationLabel(item)}
               </NavLink>
             ))}
           </nav>
@@ -394,9 +409,10 @@ function AppShell({
         />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/theme" element={<ThemesPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
       <footer className="app-footer-strip bg-background px-4 py-3 text-center text-[10px] text-muted-foreground">
-        ARTCTL v1.9
+        ARTCTL v1.10
       </footer>
     </div>
   );
@@ -434,30 +450,32 @@ export function App({ apiBaseUrl = "", fetchImpl = fetch }) {
 
   return (
     <ThemeProvider>
-      {!shell || !adminSession ? (
-        <p>Booting ARTCTL...</p>
-      ) : (
-        <BrowserRouter>
-          <AppShell
-            shell={shell}
-            apiBaseUrl={apiBaseUrl}
-            fetchImpl={fetchImpl}
-            adminSession={adminSession}
-            onAdminAuthenticated={() => {
-              setAdminSession((currentSession) => ({
-                ...(currentSession ?? {}),
-                authenticated: true
-              }));
-            }}
-            onAdminLoggedOut={() => {
-              setAdminSession((currentSession) => ({
-                ...(currentSession ?? {}),
-                authenticated: false
-              }));
-            }}
-          />
-        </BrowserRouter>
-      )}
+      <SettingsProvider>
+        {!shell || !adminSession ? (
+          <p>Booting ARTCTL...</p>
+        ) : (
+          <BrowserRouter>
+            <AppShell
+              shell={shell}
+              apiBaseUrl={apiBaseUrl}
+              fetchImpl={fetchImpl}
+              adminSession={adminSession}
+              onAdminAuthenticated={() => {
+                setAdminSession((currentSession) => ({
+                  ...(currentSession ?? {}),
+                  authenticated: true
+                }));
+              }}
+              onAdminLoggedOut={() => {
+                setAdminSession((currentSession) => ({
+                  ...(currentSession ?? {}),
+                  authenticated: false
+                }));
+              }}
+            />
+          </BrowserRouter>
+        )}
+      </SettingsProvider>
     </ThemeProvider>
   );
 }

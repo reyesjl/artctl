@@ -142,7 +142,7 @@ function createBinaryResponse(
 }
 
 describe("SPA route refresh", () => {
-  test.each(["/", "/search", "/works/42", "/help", "/theme"])(
+  test.each(["/", "/search", "/works/42", "/help", "/theme", "/settings"])(
     "GET %s returns the ARTCTL shell",
     async (url) => {
       const response = await makeRequest(url);

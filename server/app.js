@@ -249,6 +249,7 @@ export function createArtctlApp(options = {}) {
         { href: "/search", label: "Search" },
         { href: "/help", label: "Help" },
         { href: "/theme", label: "Theme" },
+        { href: "/settings", label: "Settings" },
         { href: "/admin", label: "Admin" }
       ]
     });
