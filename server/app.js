@@ -38,6 +38,17 @@ function normalizeExcludeRestricted(value) {
   return true;
 }
 
+function normalizeObjectIdList(value) {
+  return Array.from(
+    new Set(
+      String(value ?? "")
+        .split(",")
+        .map((part) => Number.parseInt(part.trim(), 10))
+        .filter((objectId) => Number.isInteger(objectId) && objectId > 0)
+    )
+  );
+}
+
 function normalizeCuratedGroupSlug(value) {
   const normalizedGroupSlug = String(value ?? "").trim();
   return normalizedGroupSlug || "homepage";
@@ -468,6 +479,33 @@ export function createArtctlApp(options = {}) {
     } catch (error) {
       response.status(502).json(buildMetErrorBody(metClient, error.message));
     }
+  });
+
+  app.get("/api/search/random-work", async (request, response) => {
+    if (!ensureCatalogReady(response, catalog)) {
+      return;
+    }
+
+    if (!catalog?.getRandomWork) {
+      response.status(501).json({
+        error: "Random work is only available from the local catalog."
+      });
+      return;
+    }
+
+    const excludeObjectIds = normalizeObjectIdList(request.query.excludeObjectIds);
+    const work = await catalog.getRandomWork({ excludeObjectIds });
+
+    if (!work) {
+      response.status(404).json({
+        error: "No unrestricted works available."
+      });
+      return;
+    }
+
+    response.json({
+      objectId: work.objectId
+    });
   });
 
   app.get("/api/search/departments", async (_request, response) => {

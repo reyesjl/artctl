@@ -2036,7 +2036,8 @@ describe("work detail API", () => {
       dimensions: "",
       imageUrl: "https://images.metmuseum.org/CRDImages/aw/original/DT5046.jpg",
       metUrl: "http://www.metmuseum.org/art/collection/search/5046",
-      isPublicDomain: true
+      isPublicDomain: true,
+      hydrationStatus: "hydrated"
     });
     expect(secondResponse.statusCode).toBe(200);
     expect(JSON.parse(secondResponse._getData()).imageUrl).toBe(
@@ -2189,9 +2190,15 @@ describe("work detail API", () => {
     const secondResponse = await makeRequest("/api/works/5046", detailApp);
 
     expect(firstResponse.statusCode).toBe(200);
-    expect(JSON.parse(firstResponse._getData()).imageUrl).toBe("");
+    expect(JSON.parse(firstResponse._getData())).toMatchObject({
+      imageUrl: "",
+      hydrationStatus: "no_image"
+    });
     expect(secondResponse.statusCode).toBe(200);
-    expect(JSON.parse(secondResponse._getData()).imageUrl).toBe("");
+    expect(JSON.parse(secondResponse._getData())).toMatchObject({
+      imageUrl: "",
+      hydrationStatus: "no_image"
+    });
     expect(hydrationRequests).toEqual([
       "https://collectionapi.metmuseum.org/public/collection/v1/objects/5046"
     ]);
@@ -2370,6 +2377,52 @@ describe("search API", () => {
       error: "Catalog import required.",
       scope: "catalog",
       code: "CATALOG_IMPORT_REQUIRED"
+    });
+  });
+
+  test("GET /api/search/random-work returns a random unrestricted object ID from the local catalog", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getRandomWork({ excludeObjectIds }) {
+        expect(excludeObjectIds).toEqual([123, 456]);
+
+        return {
+          objectId: 436121,
+          title: "The Great Wave off Kanagawa"
+        };
+      }
+    };
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest(
+      "/api/search/random-work?excludeObjectIds=123,456,123",
+      searchApp
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response._getData())).toEqual({
+      objectId: 436121
+    });
+  });
+
+  test("GET /api/search/random-work returns 404 when no unrestricted works remain", async () => {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getRandomWork() {
+        return null;
+      }
+    };
+    const searchApp = createArtctlApp({ catalog });
+
+    const response = await makeRequest("/api/search/random-work", searchApp);
+
+    expect(response.statusCode).toBe(404);
+    expect(JSON.parse(response._getData())).toEqual({
+      error: "No unrestricted works available."
     });
   });
 

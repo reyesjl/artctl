@@ -193,7 +193,9 @@ function AppShell({
       <header className="app-header-strip flex items-center justify-between gap-3 bg-background px-4 py-2 text-foreground">
         <div className="flex min-w-0 items-center gap-4">
           <div className="grid gap-1">
-            <strong className="brand text-sm font-bold text-primary">{shell.brand}</strong>
+            <NavLink to="/" className="brand text-sm font-bold text-primary">
+              {shell.brand}
+            </NavLink>
           </div>
           <nav className="hidden gap-2 text-xs sm:flex" aria-label="Primary">
             {navigation.map((item) => (
@@ -245,7 +247,13 @@ function AppShell({
           className="fixed inset-0 z-50 bg-background px-4 py-3 sm:hidden"
         >
           <div className="flex items-center justify-between border-b border-border pb-3">
-            <strong className="brand text-sm font-bold text-primary">{shell.brand}</strong>
+            <NavLink
+              to="/"
+              className="brand text-sm font-bold text-primary"
+              onClick={() => setIsMobileMenuOpen(false)}
+            >
+              {shell.brand}
+            </NavLink>
             <button
               type="button"
               aria-label="close menu"
@@ -388,7 +396,7 @@ function AppShell({
         <Route path="/theme" element={<ThemesPage />} />
       </Routes>
       <footer className="app-footer-strip bg-background px-4 py-3 text-center text-[10px] text-muted-foreground">
-        ARTCTL v1.7
+        ARTCTL v1.9
       </footer>
     </div>
   );

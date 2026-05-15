@@ -1175,6 +1175,34 @@ export function createSqliteCatalog({
       });
     },
 
+    async getRandomWork({ excludeObjectIds = [] } = {}) {
+      return withDatabase(databasePath, (database) => {
+        const excludedIds = Array.from(
+          new Set(
+            excludeObjectIds.filter((objectId) => Number.isInteger(objectId) && objectId > 0)
+          )
+        );
+        const exclusionClause =
+          excludedIds.length > 0
+            ? `AND object_id NOT IN (${excludedIds.map(() => "?").join(", ")})`
+            : "";
+        const row = database
+          .prepare(
+            `
+              SELECT ${catalogRecordProjectionSql}
+              FROM objects
+              WHERE is_public_domain = 1
+              ${exclusionClause}
+              ORDER BY RANDOM()
+              LIMIT 1
+            `
+          )
+          .get(...excludedIds);
+
+        return row ? normalizeWorkDetail(row) : null;
+      });
+    },
+
     async getWork(objectId) {
       const row = withDatabase(databasePath, (database) =>
         database

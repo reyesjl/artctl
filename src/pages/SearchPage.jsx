@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { RouteFrame } from "../components/RouteFrame.jsx";
 
 function normalizePageParam(value) {
@@ -50,6 +50,9 @@ const MEDIUM_OPTIONS = [
 ];
 const SEARCH_PAGE_SIZE = 12;
 const PAGINATION_WINDOW_SIZE = 10;
+const RANDOM_WORK_MAX_ATTEMPTS = 5;
+const RANDOM_WORK_RETRY_DELAY_MS = 500;
+const RANDOM_WORK_RETRY_JITTER_MS = 250;
 
 function buildPaginationWindow(page, totalResults) {
   const totalPages = Math.max(1, Math.ceil(totalResults / SEARCH_PAGE_SIZE));
@@ -66,6 +69,7 @@ function buildPaginationWindow(page, totalResults) {
 }
 
 export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q")?.trim() ?? "";
   const departmentId = searchParams.get("departmentId")?.trim() ?? "";
@@ -83,11 +87,10 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
   const [totalResults, setTotalResults] = useState(0);
   const [searchDurationMs, setSearchDurationMs] = useState(0);
   const [error, setError] = useState("");
+  const [randomWorkError, setRandomWorkError] = useState("");
+  const [randomWorkStatus, setRandomWorkStatus] = useState("idle");
   const [status, setStatus] = useState("idle");
-  const [showDepartments, setShowDepartments] = useState(false);
-  const [showMedia, setShowMedia] = useState(false);
-  const departmentsPopoverRef = useRef(null);
-  const mediaPopoverRef = useRef(null);
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
     setDraftQuery(query);
@@ -204,29 +207,6 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     };
   }, [apiBaseUrl, departmentId, excludeRestricted, fetchImpl, medium, page, query, searchParams]);
 
-  useEffect(() => {
-    function handleDocumentPointerDown(event) {
-      const target = event.target;
-
-      if (
-        departmentsPopoverRef.current &&
-        !departmentsPopoverRef.current.contains(target)
-      ) {
-        setShowDepartments(false);
-      }
-
-      if (mediaPopoverRef.current && !mediaPopoverRef.current.contains(target)) {
-        setShowMedia(false);
-      }
-    }
-
-    document.addEventListener("mousedown", handleDocumentPointerDown);
-
-    return () => {
-      document.removeEventListener("mousedown", handleDocumentPointerDown);
-    };
-  }, []);
-
   function handleSubmit(event) {
     event.preventDefault();
 
@@ -282,6 +262,84 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     setDraftExcludeRestricted(true);
   }
 
+  async function handleRandomWork() {
+    if (randomWorkStatus === "loading") {
+      return;
+    }
+
+    setRandomWorkError("");
+    setRandomWorkStatus("loading");
+    const attemptedObjectIds = [];
+
+    try {
+      for (let attempt = 0; attempt < RANDOM_WORK_MAX_ATTEMPTS; attempt += 1) {
+        const requestParams = new URLSearchParams();
+
+        if (attemptedObjectIds.length > 0) {
+          requestParams.set("excludeObjectIds", attemptedObjectIds.join(","));
+        }
+
+        const randomWorkResponse = await fetchImpl(
+          `${apiBaseUrl}/api/search/random-work${requestParams.size > 0 ? `?${requestParams.toString()}` : ""}`
+        );
+        const randomWorkData = await randomWorkResponse.json();
+
+        if (!randomWorkResponse.ok) {
+          setRandomWorkError(randomWorkData.error || "Unable to find a random work.");
+          setRandomWorkStatus("idle");
+          return;
+        }
+
+        const objectId = Number.parseInt(String(randomWorkData.objectId ?? ""), 10);
+
+        if (Number.isNaN(objectId)) {
+          setRandomWorkError("Unable to find a random work.");
+          setRandomWorkStatus("idle");
+          return;
+        }
+
+        attemptedObjectIds.push(objectId);
+
+        const workResponse = await fetchImpl(`${apiBaseUrl}/api/works/${objectId}`);
+        const workData = await workResponse.json();
+
+        if (!workResponse.ok) {
+          setRandomWorkError(workData.error || "Unable to load work.");
+          setRandomWorkStatus("idle");
+          return;
+        }
+
+        if (workData.hydrationStatus === "no_image") {
+          if (attempt === RANDOM_WORK_MAX_ATTEMPTS - 1) {
+            setRandomWorkError("Unable to find a random work with an image right now.");
+            setRandomWorkStatus("idle");
+            return;
+          }
+
+          const retryDelayMs =
+            RANDOM_WORK_RETRY_DELAY_MS +
+            Math.floor(Math.random() * RANDOM_WORK_RETRY_JITTER_MS);
+
+          await new Promise((resolve) => {
+            window.setTimeout(resolve, retryDelayMs);
+          });
+          continue;
+        }
+
+        setRandomWorkStatus("idle");
+        navigate(`/works/${objectId}`);
+        return;
+      }
+    } catch (randomWorkLoadError) {
+      setRandomWorkError(
+        randomWorkLoadError instanceof Error
+          ? randomWorkLoadError.message
+          : "Unable to find a random work."
+      );
+      setRandomWorkStatus("idle");
+    }
+  }
+
   const activeDepartment = departments.find(
     (department) => String(department.departmentId) === draftDepartmentId
   );
@@ -296,6 +354,11 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
     .filter(Boolean)
     .join(" · ");
   const hasActiveFilters = Boolean(activeDepartment || activeMedium || !draftExcludeRestricted);
+  const activeFilterCount = [
+    activeDepartment ? 1 : 0,
+    activeMedium ? 1 : 0,
+    !draftExcludeRestricted ? 1 : 0
+  ].reduce((total, count) => total + count, 0);
   const paginationWindow = buildPaginationWindow(page, totalResults);
   const hasPreviousWindow = paginationWindow.windowStart > 1;
   const hasNextWindow = paginationWindow.windowEnd < paginationWindow.totalPages;
@@ -325,117 +388,27 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
           </div>
           <div className="px-3 py-2 text-xs">
             <div className="flex flex-wrap items-start gap-3">
-              <div className="relative" ref={departmentsPopoverRef}>
+                <button
+                  className="search-button text-action"
+                  type="submit"
+                >
+                  [search]
+                </button>
                 <button
                   type="button"
-                  className={showDepartments ? "text-action text-primary" : "text-action"}
-                  aria-expanded={showDepartments}
+                  className={randomWorkStatus === "loading" ? "text-action text-primary" : "text-action"}
+                  disabled={randomWorkStatus === "loading"}
                   onClick={() => {
-                    setShowDepartments((current) => !current);
-                    setShowMedia(false);
+                    void handleRandomWork();
                   }}
                 >
-                  [departments]
+                  {randomWorkStatus === "loading" ? "[finding random work]" : "[random work]"}
                 </button>
-                {showDepartments ? (
-                  <div
-                    data-search-filter-popover="departments"
-                    className="absolute left-0 top-full z-10 mt-2 w-max max-w-[calc(100vw-2rem)] max-h-56 overflow-y-auto border border-border border-solid bg-background p-3"
-                  >
-                    <div className="grid gap-2">
-                      {departments.map((department) => (
-                        <button
-                          key={department.departmentId}
-                          type="button"
-                          className={[
-                            "appearance-none border-0 bg-transparent p-0 text-left shadow-none transition-colors",
-                            draftDepartmentId === String(department.departmentId)
-                              ? "text-primary"
-                              : "text-foreground hover:text-primary"
-                          ].join(" ")}
-                          onClick={() => {
-                            setDraftDepartmentId(String(department.departmentId));
-                            setShowDepartments(false);
-                          }}
-                        >
-                          [{department.displayName.toLowerCase()}]
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              <div className="relative" ref={mediaPopoverRef}>
-                <button
-                  type="button"
-                  className={showMedia ? "text-action text-primary" : "text-action"}
-                  aria-expanded={showMedia}
-                  onClick={() => {
-                    setShowMedia((current) => !current);
-                    setShowDepartments(false);
-                  }}
-                >
-                  [media]
-                </button>
-                {showMedia ? (
-                  <div
-                    data-search-filter-popover="media"
-                    className="absolute left-0 top-full z-10 mt-2 w-max max-w-[calc(100vw-2rem)] max-h-56 overflow-y-auto border border-border border-solid bg-background p-3"
-                  >
-                    <div className="grid gap-2">
-                      {MEDIUM_OPTIONS.map((group) => (
-                        <div key={group.label} className="grid gap-1">
-                          <p className="m-0 text-muted-foreground">{group.label.toLowerCase()}</p>
-                          <div className="grid gap-2">
-                            {group.options.map((option) => (
-                              <button
-                                key={option.value}
-                                type="button"
-                                className={[
-                                  "appearance-none border-0 bg-transparent p-0 text-left shadow-none transition-colors",
-                                  draftMedium === option.value
-                                    ? "text-primary"
-                                    : "text-foreground hover:text-primary"
-                                ].join(" ")}
-                                onClick={() => {
-                                  setDraftMedium(option.value);
-                                  setShowMedia(false);
-                                }}
-                              >
-                                [{option.label.toLowerCase()}]
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              <button
-                className="search-button text-action"
-                type="submit"
-              >
-                [search]
-              </button>
-              <button
-                type="button"
-                className={!draftExcludeRestricted ? "text-action text-primary" : "text-action"}
-                onClick={() => setDraftExcludeRestricted((current) => !current)}
-              >
-                {draftExcludeRestricted ? "[show restricted]" : "[hide restricted]"}
-              </button>
-              {hasActiveFilters ? (
-                <button
-                  type="button"
-                  className="text-action"
-                  onClick={handleClearFilters}
-                >
-                  [clear filters]
-                </button>
-              ) : null}
             </div>
           </div>
+          {randomWorkError ? (
+            <p className="m-0 px-3 pb-2 text-xs text-foreground">{randomWorkError}</p>
+          ) : null}
         </form>
         <div className="sr-only">
           <label className="search-label block text-xs text-muted-foreground" htmlFor="search-department">
@@ -490,6 +463,117 @@ export function SearchPage({ apiBaseUrl = "", fetchImpl = fetch }) {
             onChange={(event) => setDraftExcludeRestricted(event.target.checked)}
           />
         </div>
+      </div>
+      <div className="grid gap-3 text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-3 text-muted-foreground">
+          <button
+            type="button"
+            className={[
+              "transition-colors hover:text-foreground",
+              showFilters || hasActiveFilters ? "text-primary" : ""
+            ].join(" ")}
+            aria-expanded={showFilters}
+            onClick={() => setShowFilters((current) => !current)}
+          >
+            [filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}]
+          </button>
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              className="text-action hover:text-foreground"
+              onClick={handleClearFilters}
+            >
+              [clear]
+            </button>
+          ) : null}
+        </div>
+        {showFilters ? (
+          <div className="grid gap-2 text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="w-16">dept:</span>
+              <button
+                type="button"
+                className={[
+                  "px-2 py-0.5 transition-colors",
+                  !draftDepartmentId ? "text-primary bg-primary/10" : "hover:text-foreground"
+                ].join(" ")}
+                onClick={() => setDraftDepartmentId("")}
+              >
+                all
+              </button>
+              {departments.map((department) => (
+                <button
+                  key={department.departmentId}
+                  type="button"
+                  className={[
+                    "px-2 py-0.5 transition-colors",
+                    draftDepartmentId === String(department.departmentId)
+                      ? "text-primary bg-primary/10"
+                      : "hover:text-foreground"
+                  ].join(" ")}
+                  onClick={() => {
+                    setDraftDepartmentId(String(department.departmentId));
+                  }}
+                >
+                  {department.displayName.toLowerCase()}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-start gap-1">
+              <span className="w-16 pt-0.5">media:</span>
+              <button
+                type="button"
+                className={[
+                  "px-2 py-0.5 transition-colors",
+                  !draftMedium ? "text-primary bg-primary/10" : "hover:text-foreground"
+                ].join(" ")}
+                onClick={() => setDraftMedium("")}
+              >
+                all
+              </button>
+              {MEDIUM_OPTIONS.flatMap((group) => group.options).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={[
+                    "px-2 py-0.5 transition-colors",
+                    draftMedium === option.value
+                      ? "text-primary bg-primary/10"
+                      : "hover:text-foreground"
+                  ].join(" ")}
+                  onClick={() => {
+                    setDraftMedium(option.value);
+                  }}
+                >
+                  {option.label.toLowerCase()}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="w-16">rights:</span>
+              <button
+                type="button"
+                className={[
+                  "px-2 py-0.5 transition-colors",
+                  draftExcludeRestricted ? "text-primary bg-primary/10" : "hover:text-foreground"
+                ].join(" ")}
+                onClick={() => setDraftExcludeRestricted(true)}
+              >
+                hide restricted
+              </button>
+              <button
+                type="button"
+                className={[
+                  "px-2 py-0.5 transition-colors",
+                  !draftExcludeRestricted ? "text-primary bg-primary/10" : "hover:text-foreground"
+                ].join(" ")}
+                onClick={() => setDraftExcludeRestricted(false)}
+              >
+                show restricted
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
       {hasActiveFilters ? (
         <p className="m-0 text-xs text-foreground">{activeFiltersLabel}</p>

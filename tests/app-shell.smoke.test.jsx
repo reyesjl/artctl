@@ -33,6 +33,7 @@ const defaultMetClient = {
 function createFetchImpl({
   requestLog = [],
   metClient,
+  catalog,
   catalogDatabasePath = null,
   hydrationFetchImpl,
   adminAuth = undefined,
@@ -40,7 +41,9 @@ function createFetchImpl({
   autoAuthenticateAdmin = false
 } = {}) {
   const apiOptions = {
-    ...(metClient
+    ...(catalog
+      ? { catalog }
+      : metClient
       ? { metClient, allowLegacyMetRuntime: true }
       : { catalogDatabasePath, hydrationFetchImpl }),
     ...(adminAuth !== undefined ? { adminAuth } : {}),
@@ -300,12 +303,13 @@ test("homepage loads the persistent app shell from the Express backend", async (
   expect(screen.queryByText("Met collection terminal viewer")).not.toBeInTheDocument();
   expect(window.localStorage.getItem("artctl-theme")).toBe("dark-orange");
   expect(document.documentElement.style.getPropertyValue("--background")).toBe("25 30% 5%");
+  expect(screen.getByRole("link", { name: "ARTCTL" })).toHaveAttribute("href", "/");
   expect(screen.getByRole("link", { name: "[gallery]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[search]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[help]" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "[theme]" })).toBeInTheDocument();
   const header = screen.getByRole("banner");
-  const footer = screen.getByText("ARTCTL v1.7").closest("footer");
+  const footer = screen.getByText("ARTCTL v1.9").closest("footer");
   const galleryLink = screen.getByRole("link", { name: "[gallery]" });
 
   expect(header).not.toHaveClass("bg-card");
@@ -1503,8 +1507,7 @@ test("search route keeps its content on the shared shell background", async () =
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   expect(queryInput).not.toBeNull();
   expect(screen.getByText("> type search")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "[departments]" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "[media]" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[filters]" })).toBeInTheDocument();
   expect(searchShell).toHaveClass("border");
   expect(searchShell).toHaveClass("border-solid");
   expect(searchShell).toHaveClass("border-border");
@@ -1512,10 +1515,10 @@ test("search route keeps its content on the shared shell background", async () =
   expect(searchShell).toHaveClass("divide-border");
   expect(searchForm).not.toHaveClass("border");
   expect(screen.getByRole("link", { name: "[search]" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByText("ARTCTL v1.7")).toBeInTheDocument();
+  expect(screen.getByText("ARTCTL v1.9")).toBeInTheDocument();
 });
 
-test("search route reveals terminal-style department and media pickers from the action strip", async () => {
+test("search route reveals inline filter controls from the filter toggle", async () => {
   window.history.pushState({}, "", "/search");
 
   const metClient = {
@@ -1534,48 +1537,27 @@ test("search route reveals terminal-style department and media pickers from the 
 
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
-  const departmentsButton = await screen.findByRole("button", { name: "[departments]" });
-  const mediaButton = screen.getByRole("button", { name: "[media]" });
+  const filterButton = await screen.findByRole("button", { name: "[filters]" });
   const searchButton = screen.getByRole("button", { name: "[search]" });
-  const actionsRow = departmentsButton.closest(".flex");
+  const actionsRow = searchButton.closest(".flex");
 
-  expect(actionsRow).toContainElement(mediaButton);
   expect(actionsRow).toContainElement(searchButton);
+  expect(filterButton).toHaveAttribute("aria-expanded", "false");
 
-  fireEvent.click(departmentsButton);
-  const europeanPaintings = await screen.findByRole("button", { name: "[european paintings]" });
-  const departmentsPopover = europeanPaintings.closest("[data-search-filter-popover='departments']");
+  fireEvent.click(filterButton);
+  const europeanPaintings = await screen.findByRole("button", { name: "european paintings" });
   expect(europeanPaintings).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "[arms and armor]" })).toBeInTheDocument();
-  expect(departmentsPopover).toBeInTheDocument();
-  expect(departmentsPopover).toHaveClass("max-h-56");
-  expect(departmentsPopover).toHaveClass("overflow-y-auto");
-  expect(departmentsPopover).toHaveClass("w-max");
-  expect(departmentsButton).toHaveClass("text-primary");
+  expect(screen.getByRole("button", { name: "arms and armor" })).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "all" }).length).toBeGreaterThan(0);
+  expect(screen.getByRole("button", { name: "paintings" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "hide restricted" })).toBeInTheDocument();
+  expect(filterButton).toHaveAttribute("aria-expanded", "true");
+  expect(filterButton).toHaveClass("text-primary");
   fireEvent.click(europeanPaintings);
-  expect(screen.queryByRole("button", { name: "[european paintings]" })).not.toBeInTheDocument();
-  expect(departmentsButton).not.toHaveClass("text-primary");
-
-  fireEvent.click(mediaButton);
-  const paintings = screen.getByRole("button", { name: "[paintings]" });
-  const mediaPopover = paintings.closest("[data-search-filter-popover='media']");
-  expect(paintings).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "[oil]" })).toBeInTheDocument();
-  expect(mediaPopover).toBeInTheDocument();
-  expect(mediaPopover).toHaveClass("max-h-56");
-  expect(mediaPopover).toHaveClass("overflow-y-auto");
-  expect(mediaPopover).toHaveClass("w-max");
-  expect(mediaButton).toHaveClass("text-primary");
-  fireEvent.click(paintings);
-  expect(screen.queryByRole("button", { name: "[paintings]" })).not.toBeInTheDocument();
-  expect(mediaButton).not.toHaveClass("text-primary");
-
-  fireEvent.click(mediaButton);
-  await screen.findByRole("button", { name: "[paintings]" });
-  fireEvent.mouseDown(document.body);
-
-  expect(screen.queryByRole("button", { name: "[paintings]" })).not.toBeInTheDocument();
-  expect(mediaButton).not.toHaveClass("text-primary");
+  fireEvent.click(screen.getByRole("button", { name: "paintings" }));
+  fireEvent.click(filterButton);
+  expect(screen.queryByRole("button", { name: "european paintings" })).not.toBeInTheDocument();
+  expect(filterButton).toHaveAttribute("aria-expanded", "false");
 });
 
 test("search route applies active styling to the selected department and media filters", async () => {
@@ -1597,49 +1579,25 @@ test("search route applies active styling to the selected department and media f
 
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
-  fireEvent.click(await screen.findByRole("button", { name: "[departments]" }));
-  const europeanPaintings = await screen.findByRole("button", { name: "[european paintings]" });
-  const armsAndArmor = screen.getByRole("button", { name: "[arms and armor]" });
+  fireEvent.click(await screen.findByRole("button", { name: "[filters]" }));
+  const europeanPaintings = await screen.findByRole("button", { name: "european paintings" });
+  const armsAndArmor = screen.getByRole("button", { name: "arms and armor" });
   fireEvent.click(europeanPaintings);
-  fireEvent.click(screen.getByRole("button", { name: "[departments]" }));
-  const reopenedEuropeanPaintings = await screen.findByRole("button", {
-    name: "[european paintings]"
-  });
-  const reopenedArmsAndArmor = screen.getByRole("button", { name: "[arms and armor]" });
-
+  const reopenedEuropeanPaintings = screen.getByRole("button", { name: "european paintings" });
+  const reopenedArmsAndArmor = screen.getByRole("button", { name: "arms and armor" });
   expect(reopenedEuropeanPaintings).toHaveClass("text-primary");
-  expect(reopenedEuropeanPaintings).not.toHaveClass("bg-primary/10");
-  expect(reopenedEuropeanPaintings).toHaveClass("appearance-none");
-  expect(reopenedEuropeanPaintings).toHaveClass("bg-transparent");
-  expect(reopenedEuropeanPaintings).toHaveClass("border-0");
-  expect(reopenedEuropeanPaintings).toHaveClass("text-left");
+  expect(reopenedEuropeanPaintings).toHaveClass("bg-primary/10");
   expect(reopenedArmsAndArmor).not.toHaveClass("bg-primary/10");
-  expect(reopenedArmsAndArmor).not.toHaveClass("text-muted-foreground");
-  expect(reopenedArmsAndArmor).toHaveClass("appearance-none");
-  expect(reopenedArmsAndArmor).toHaveClass("bg-transparent");
-  expect(reopenedArmsAndArmor).toHaveClass("border-0");
-  expect(reopenedArmsAndArmor).toHaveClass("text-left");
 
-  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
-  const wood = screen.getByRole("button", { name: "[wood]" });
-  const oil = screen.getByRole("button", { name: "[oil]" });
+  const wood = screen.getByRole("button", { name: "wood" });
+  const oil = screen.getByRole("button", { name: "oil" });
   fireEvent.click(wood);
-  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
-  const reopenedWood = await screen.findByRole("button", { name: "[wood]" });
-  const reopenedOil = screen.getByRole("button", { name: "[oil]" });
+  const reopenedWood = screen.getByRole("button", { name: "wood" });
+  const reopenedOil = screen.getByRole("button", { name: "oil" });
 
   expect(reopenedWood).toHaveClass("text-primary");
-  expect(reopenedWood).not.toHaveClass("bg-primary/10");
-  expect(reopenedWood).toHaveClass("appearance-none");
-  expect(reopenedWood).toHaveClass("bg-transparent");
-  expect(reopenedWood).toHaveClass("border-0");
-  expect(reopenedWood).toHaveClass("text-left");
+  expect(reopenedWood).toHaveClass("bg-primary/10");
   expect(reopenedOil).not.toHaveClass("bg-primary/10");
-  expect(reopenedOil).not.toHaveClass("text-muted-foreground");
-  expect(reopenedOil).toHaveClass("appearance-none");
-  expect(reopenedOil).toHaveClass("bg-transparent");
-  expect(reopenedOil).toHaveClass("border-0");
-  expect(reopenedOil).toHaveClass("text-left");
 });
 
 test("search route shows active filters and can clear them from the filter actions", async () => {
@@ -1661,25 +1619,22 @@ test("search route shows active filters and can clear them from the filter actio
 
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
-  expect(screen.queryByRole("button", { name: "[clear filters]" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "[clear]" })).not.toBeInTheDocument();
   expect(screen.queryByText(/European Paintings|Wood/)).not.toBeInTheDocument();
 
-  fireEvent.click(await screen.findByRole("button", { name: "[departments]" }));
-  fireEvent.click(await screen.findByRole("button", { name: "[european paintings]" }));
-  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
-  fireEvent.click(screen.getByRole("button", { name: "[wood]" }));
+  fireEvent.click(await screen.findByRole("button", { name: "[filters]" }));
+  fireEvent.click(await screen.findByRole("button", { name: "european paintings" }));
+  fireEvent.click(screen.getByRole("button", { name: "wood" }));
 
-  expect(screen.getByRole("button", { name: "[clear filters]" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[clear]" })).toBeInTheDocument();
   expect(screen.getByText("European Paintings · Wood")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "[clear filters]" }));
+  fireEvent.click(screen.getByRole("button", { name: "[clear]" }));
 
-  expect(screen.queryByRole("button", { name: "[clear filters]" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "[clear]" })).not.toBeInTheDocument();
   expect(screen.queryByText("European Paintings · Wood")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "[departments]" }));
-  expect(screen.getByRole("button", { name: "[european paintings]" })).not.toHaveClass("text-primary");
-  fireEvent.click(screen.getByRole("button", { name: "[media]" }));
-  expect(screen.getByRole("button", { name: "[wood]" })).not.toHaveClass("text-primary");
+  expect(screen.getByRole("button", { name: "european paintings" })).not.toHaveClass("text-primary");
+  expect(screen.getByRole("button", { name: "wood" })).not.toHaveClass("text-primary");
 });
 
 test("current route marks only the active nav link", async () => {
@@ -2504,6 +2459,7 @@ test("search route shows an empty state before any query is submitted", async ()
   render(<App fetchImpl={createFetchImpl({ requestLog: requests })} />);
 
   expect(await screen.findByText("> type search")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "[random work]" })).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Search" })).not.toBeInTheDocument();
   await waitFor(() => {
     expect(requests).toEqual(["/api/app-shell", "/api/admin/session", "/api/search/departments"]);
@@ -2562,9 +2518,9 @@ test("search route renders text actions while preserving current submission beha
   render(<App fetchImpl={createFetchImpl({ metClient })} />);
 
   const queryInput = await screen.findByLabelText("Query");
-  const departmentsButton = screen.getByRole("button", { name: "[departments]" });
-  const mediaButton = screen.getByRole("button", { name: "[media]" });
+  const filterButton = screen.getByRole("button", { name: "[filters]" });
   const searchButton = screen.getByRole("button", { name: "[search]" });
+  const randomWorkButton = screen.getByRole("button", { name: "[random work]" });
   const searchShell = queryInput.closest(".search-shell");
 
   expect(screen.getByText("> type search")).toBeInTheDocument();
@@ -2576,9 +2532,9 @@ test("search route renders text actions while preserving current submission beha
   expect(queryInput).toHaveClass("font-mono");
   expect(queryInput).toHaveClass("shadow-none");
   expect(queryInput).toHaveAttribute("placeholder", "artist, title, culture, medium...");
-  expect(departmentsButton).toHaveTextContent("[departments]");
-  expect(mediaButton).toHaveTextContent("[media]");
+  expect(filterButton).toHaveTextContent("[filters]");
   expect(searchButton).toHaveTextContent("[search]");
+  expect(randomWorkButton).toHaveTextContent("[random work]");
   expect(searchButton).not.toHaveClass("bg-secondary");
   expect(searchButton).not.toHaveClass("border-input");
   expect(searchButton).not.toHaveClass("px-3");
@@ -2586,10 +2542,9 @@ test("search route renders text actions while preserving current submission beha
   fireEvent.change(queryInput, {
     target: { value: "landscape" }
   });
-  fireEvent.click(departmentsButton);
-  fireEvent.click(await screen.findByRole("button", { name: "[european paintings]" }));
-  fireEvent.click(mediaButton);
-  fireEvent.click(screen.getByRole("button", { name: "[wood]" }));
+  fireEvent.click(filterButton);
+  fireEvent.click(await screen.findByRole("button", { name: "european paintings" }));
+  fireEvent.click(screen.getByRole("button", { name: "wood" }));
   fireEvent.click(searchButton);
 
   expect(await screen.findByRole("link", { name: "Landscape Study" })).toHaveAttribute(
@@ -2597,6 +2552,156 @@ test("search route renders text actions while preserving current submission beha
     "/works/436121"
   );
   expect(window.location.search).toBe("?q=landscape&departmentId=11&medium=wood");
+});
+
+test("search route retries random work picks that resolve to no_image and only navigates on success", async () => {
+  const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+  try {
+    const requests = [];
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getDepartments() {
+        return { departments: [] };
+      },
+      async getRandomWork({ excludeObjectIds = [] }) {
+        if (excludeObjectIds.includes(1)) {
+          return {
+            objectId: 2,
+            title: "Work 2",
+            artist: "Artist 2",
+            date: "1900",
+            context: "Painting - Oil on canvas",
+            dimensions: "",
+            imageUrl: "https://images.metmuseum.org/CRDImages/ep/original/work-2.jpg",
+            metUrl: "https://www.metmuseum.org/art/collection/search/2",
+            isPublicDomain: true,
+            hydrationStatus: "hydrated"
+          };
+        }
+
+        return {
+          objectId: 1,
+          title: "Work 1",
+          artist: "Artist 1",
+          date: "1900",
+          context: "Painting - Oil on canvas",
+          dimensions: "",
+          imageUrl: "",
+          metUrl: "https://www.metmuseum.org/art/collection/search/1",
+          isPublicDomain: true,
+          hydrationStatus: "no_image"
+        };
+      },
+      async getWork(objectId) {
+        if (objectId === 1) {
+          return {
+            objectId: 1,
+            title: "Work 1",
+            artist: "Artist 1",
+            date: "1900",
+            context: "Painting - Oil on canvas",
+            dimensions: "",
+            imageUrl: "",
+            metUrl: "https://www.metmuseum.org/art/collection/search/1",
+            isPublicDomain: true,
+            hydrationStatus: "no_image"
+          };
+        }
+
+        return {
+          objectId: 2,
+          title: "Work 2",
+          artist: "Artist 2",
+          date: "1900",
+          context: "Painting - Oil on canvas",
+          dimensions: "",
+          imageUrl: "https://images.metmuseum.org/CRDImages/ep/original/work-2.jpg",
+          metUrl: "https://www.metmuseum.org/art/collection/search/2",
+          isPublicDomain: true,
+          hydrationStatus: "hydrated"
+        };
+      }
+    };
+
+    window.history.pushState({}, "", "/search?q=landscape&medium=wood");
+    render(<App fetchImpl={createFetchImpl({ requestLog: requests, catalog })} />);
+
+    const randomWorkButton = await screen.findByRole("button", { name: "[random work]" });
+    fireEvent.click(randomWorkButton);
+
+    expect(screen.getByRole("button", { name: "[finding random work]" })).toBeDisabled();
+    expect(window.location.pathname).toBe("/search");
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/works/2");
+    }, { timeout: 2000 });
+    expect(window.location.search).toBe("");
+    expect(requests).toContain("/api/search/random-work");
+    expect(requests).toContain("/api/search/random-work?excludeObjectIds=1");
+    expect(requests).toContain("/api/works/1");
+    expect(requests).toContain("/api/works/2");
+  } finally {
+    randomSpy.mockRestore();
+  }
+});
+
+test("search route shows an inline error when random work retries exhaust", async () => {
+  const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+  try {
+    const catalog = {
+      isReady() {
+        return true;
+      },
+      async getDepartments() {
+        return { departments: [] };
+      },
+      async getRandomWork({ excludeObjectIds = [] }) {
+        const nextObjectId = excludeObjectIds.length + 1;
+
+        return {
+          objectId: nextObjectId,
+          title: `Work ${nextObjectId}`,
+          artist: `Artist ${nextObjectId}`,
+          date: "1900",
+          context: "Painting - Oil on canvas",
+          dimensions: "",
+          imageUrl: "",
+          metUrl: `https://www.metmuseum.org/art/collection/search/${nextObjectId}`,
+          isPublicDomain: true,
+          hydrationStatus: "no_image"
+        };
+      },
+      async getWork(objectId) {
+        return {
+          objectId,
+          title: `Work ${objectId}`,
+          artist: `Artist ${objectId}`,
+          date: "1900",
+          context: "Painting - Oil on canvas",
+          dimensions: "",
+          imageUrl: "",
+          metUrl: `https://www.metmuseum.org/art/collection/search/${objectId}`,
+          isPublicDomain: true,
+          hydrationStatus: "no_image"
+        };
+      }
+    };
+
+    window.history.pushState({}, "", "/search");
+    render(<App fetchImpl={createFetchImpl({ catalog })} />);
+
+    const randomWorkButton = await screen.findByRole("button", { name: "[random work]" });
+    fireEvent.click(randomWorkButton);
+
+    expect(
+      await screen.findByText("Unable to find a random work with an image right now.", {}, { timeout: 4000 })
+    ).toBeInTheDocument();
+    expect(window.location.pathname).toBe("/search");
+  } finally {
+    randomSpy.mockRestore();
+  }
 });
 
 test("submitting search with Department and Medium filters preserves the search state", async () => {
@@ -2970,7 +3075,8 @@ test("search route hides restricted works by default and can restore a show-rest
   render(<App fetchImpl={createFetchImpl({ requestLog: requests, metClient })} />);
 
   expect(await screen.findByRole("link", { name: "Galisteo Creek" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "[hide restricted]" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "[filters (1)]" }));
+  expect(screen.getByRole("button", { name: "hide restricted" })).toBeInTheDocument();
   expect(requests).toContain("/api/search?q=rothenberg&excludeRestricted=false");
   expect(receivedSearchState).toEqual({
     query: "rothenberg",
@@ -3016,7 +3122,8 @@ test("search route can submit a show-restricted override from the filter strip",
   await waitFor(() => {
     expect(queryInput).toHaveValue("rothenberg");
   });
-  fireEvent.click(screen.getByRole("button", { name: "[show restricted]" }));
+  fireEvent.click(screen.getByRole("button", { name: "[filters]" }));
+  fireEvent.click(screen.getByRole("button", { name: "show restricted" }));
   fireEvent.click(screen.getByRole("button", { name: "[search]" }));
 
   expect(await screen.findByRole("link", { name: "Galisteo Creek" })).toBeInTheDocument();
@@ -4642,7 +4749,7 @@ test("selecting a theme updates the picker and shared panel styles to that same 
 
   render(<App fetchImpl={fetchImpl} />);
 
-  const footer = (await screen.findByText("ARTCTL v1.7")).closest("footer");
+  const footer = (await screen.findByText("ARTCTL v1.9")).closest("footer");
 
   fireEvent.click(screen.getByRole("button", { name: "Solarized" }));
 

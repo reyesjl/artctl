@@ -103,6 +103,8 @@ function normalizeContext(record) {
 }
 
 function normalizeWorkDetail(record) {
+  const hydrationStatus = String(record.hydrationStatus ?? "").trim();
+
   return {
     objectId: record.objectID,
     title: record.title,
@@ -112,7 +114,8 @@ function normalizeWorkDetail(record) {
     dimensions: String(record.dimensions ?? "").trim(),
     imageUrl: record.primaryImage || record.primaryImageSmall || "",
     metUrl: record.objectURL || `https://www.metmuseum.org/art/collection/search/${record.objectID}`,
-    isPublicDomain: Boolean(record.isPublicDomain)
+    isPublicDomain: Boolean(record.isPublicDomain),
+    ...(hydrationStatus ? { hydrationStatus } : {})
   };
 }
 
@@ -323,6 +326,20 @@ export function createInMemoryCatalog({ records = [], curatedGroups = [] } = {})
       }
 
       return normalizeWorkDetail(record);
+    },
+
+    async getRandomWork({ excludeObjectIds = [] } = {}) {
+      const excludedObjectIds = new Set(excludeObjectIds);
+      const eligibleRecords = records.filter(
+        (record) => record.isPublicDomain !== false && !excludedObjectIds.has(record.objectID)
+      );
+
+      if (eligibleRecords.length === 0) {
+        return null;
+      }
+
+      const randomIndex = Math.floor(Math.random() * eligibleRecords.length);
+      return normalizeWorkDetail(eligibleRecords[randomIndex]);
     }
   };
 }
